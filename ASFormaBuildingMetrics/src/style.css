@@ -1,0 +1,464 @@
+/* ============================================================
+   Design tokens - light mode (defaults)
+   ============================================================ */
+:root {
+    /* Typography */
+    font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+    font-weight: 400;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-text-size-adjust: 100%;
+    font-size: 9px; /* Base REM - all em values scale from here via body */
+    /* Color tokens */
+    --bg-page: #ffffff;
+    --bg-section: #f9f9f9;
+    --bg-subtle: #f1f1f1;
+    --bg-tabbar: #ffffff;
+    --bg-summary: #ffffff;
+    --bg-selected: #e3f2fd;
+    --bg-skeleton: #e8e8e8;
+    --bg-skeleton-shine: #f5f5f5;
+    --text-primary: #222;
+    --text-secondary: #666;
+    --text-muted: #999;
+    --text-on-accent: #ffffff;
+    --border-subtle: #e0e0e0;
+    --border-default: #d0d0d0;
+    --border-strong: #bbbbbb;
+    --accent: #2196f3;
+    --accent-hover: #1976d2;
+    --accent-active: #1565c0;
+    --error-bg: #d32f2f;
+    --error-text: #ffffff;
+    --shadow-float: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* ============================================================
+   Design tokens - dark mode
+   ============================================================ */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg-page: #1a1a1a;
+        --bg-section: #2d2d2d;
+        --bg-subtle: #242424;
+        --bg-tabbar: #111111;
+        --bg-summary: #212121;
+        --bg-selected: #1e3a5f;
+        --bg-skeleton: #333333;
+        --bg-skeleton-shine: #3d3d3d;
+        --text-primary: #e0e0e0;
+        --text-secondary: #aaaaaa;
+        --text-muted: #777777;
+        --border-subtle: #333333;
+        --border-default: #444444;
+        --border-strong: #555555;
+        --accent: #1565c0;
+        --accent-hover: #1976d2;
+        --accent-active: #2196f3;
+        --shadow-float: 0 4px 12px rgba(0, 0, 0, 0.6);
+    }
+}
+
+/* ============================================================
+   Base elements
+   ============================================================ */
+body {
+    margin: 0;
+    padding: 0;
+    font-size: 1.2em; /* = 14px with 10px root */
+    background-color: var(--bg-page);
+    color: var(--text-primary);
+    min-height: 100vh;
+}
+
+#app {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 1em 8em 1em; /* bottom padding leaves room for floating legend */
+}
+
+h2 {
+    font-size: 1.4em;
+    margin: 0.3em 0;
+    font-weight: 600;
+}
+
+h3 {
+    font-size: 1.1em;
+    margin: 0.5em 0;
+    font-weight: 600;
+}
+
+p {
+    font-size: 0.9em;
+    margin: 0.5em 0;
+}
+
+/* ============================================================
+   Section (existing baseline, preserved)
+   ============================================================ */
+.section {
+    background: var(--bg-section);
+    border-radius: 8px;
+    padding: 1.5em;
+    margin-bottom: 1em;
+    color: var(--text-primary);
+}
+
+/* ============================================================
+   Buttons
+   ============================================================ */
+.button,
+button {
+    background: var(--accent);
+    color: var(--text-on-accent);
+    border: none;
+    border-radius: 4px;
+    padding: 0.4em 0.9em;
+    font-size: 0.9em;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+    .button:disabled,
+    button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .button:hover:not(:disabled),
+    button:hover:not(:disabled) {
+        background: var(--accent-hover);
+    }
+
+/* Secondary / ghost button variant for mode toggles etc. */
+.button-ghost {
+    background: transparent;
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+}
+
+    .button-ghost:hover:not(:disabled) {
+        background: var(--bg-subtle);
+    }
+
+    .button-ghost.is-active {
+        background: var(--accent);
+        color: var(--text-on-accent);
+        border-color: var(--accent);
+    }
+
+/* ============================================================
+   Error banner (top of app, dismissible-looking)
+   ============================================================ */
+.error-banner {
+    background: var(--error-bg);
+    color: var(--error-text);
+    padding: 0.8em 1.2em;
+    border-radius: 6px;
+    margin-bottom: 1em;
+    font-size: 0.9em;
+    display: flex;
+    align-items: center;
+    gap: 0.8em;
+}
+
+.error-banner__icon {
+    font-weight: bold;
+}
+
+/* ============================================================
+   Summary strip - always visible at the top
+   ============================================================ */
+.summary-strip {
+    background: var(--bg-summary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 1em 1.5em;
+    margin-bottom: 0.8em;
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+}
+
+.summary-stat {
+    flex: 1;
+    padding: 0 1em;
+    text-align: center;
+    border-right: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.2em;
+}
+
+    .summary-stat:last-child {
+        border-right: none;
+    }
+
+.summary-stat__label {
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.summary-stat__value {
+    font-size: 1.6em;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.1;
+}
+
+.summary-stat__unit {
+    font-size: 0.7em;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-left: 0.2em;
+}
+
+/* ============================================================
+   Tab bar
+   ============================================================ */
+.tab-bar {
+    background: var(--bg-tabbar);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    gap: 0;
+    margin-bottom: 1em;
+    padding: 0 0.2em;
+}
+
+.tab {
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    padding: 0.6em 1em; 
+    font-size: 0.9em;
+    font-family: inherit;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-weight: 500;
+    border-radius: 0;
+}
+
+    .tab:hover:not(:disabled):not(.tab--active) {
+        background: var(--bg-subtle);
+        color: var(--text-primary);
+    }
+
+.tab--active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 700;
+    background: transparent;
+}
+
+/* Override generic button hover for tabs */
+.tab:hover:not(:disabled) {
+    background: var(--bg-subtle);
+}
+
+.tab--active:hover:not(:disabled) {
+    background: transparent;
+    color: var(--accent);
+}
+
+/* ============================================================
+   Skeleton loading rows
+   ============================================================ */
+.skeleton-row {
+    height: 2.2em;
+    background: linear-gradient( 90deg, var(--bg-skeleton) 0%, var(--bg-skeleton-shine) 50%, var(--bg-skeleton) 100% );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.4s infinite ease-in-out;
+    border-radius: 4px;
+    margin-bottom: 0.5em;
+}
+
+@keyframes skeleton-shimmer {
+    0% {
+        background-position: 200% 0;
+    }
+
+    100% {
+        background-position: -200% 0;
+    }
+}
+
+/* ============================================================
+   Spinner (for buttons during processing)
+   ============================================================ */
+.spinner {
+    display: inline-block;
+    animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ============================================================
+   Helpers
+   ============================================================ */
+.muted {
+    color: var(--text-secondary);
+    font-size: 0.9em;
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+}
+
+.row--wrap {
+    flex-wrap: wrap;
+}
+/* ============================================================
+   Building list panel - compact rows
+   ============================================================ */
+.building-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    background: var(--bg-page);
+}
+
+.building-row {
+    display: grid;
+    grid-template-columns: 3em 1fr 1fr 1fr;
+    align-items: center;
+    gap: 0.8em;
+    padding: 0.6em 0.9em;
+    border-bottom: 1px solid var(--border-subtle);
+    border-left: 3px solid transparent;
+    cursor: pointer;
+    transition: background 0.1s ease, border-left-color 0.1s ease;
+    font-size: 0.95em;
+}
+
+    .building-row:last-child {
+        border-bottom: none;
+    }
+
+    .building-row:hover {
+        background: var(--bg-subtle);
+    }
+
+.building-row--selected {
+    background: var(--bg-selected);
+    border-left-color: var(--accent);
+}
+
+    .building-row--selected:hover {
+        background: var(--bg-selected);
+    }
+
+.building-row__index {
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.building-row__metric {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+
+.building-row__metric-label {
+    color: var(--text-muted);
+    font-size: 0.85em;
+    margin-right: 0.3em;
+}
+
+/* Scrollbar polish */
+.building-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.building-list::-webkit-scrollbar-track {
+    background: var(--bg-subtle);
+}
+
+.building-list::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 4px;
+}
+
+    .building-list::-webkit-scrollbar-thumb:hover {
+        background: var(--text-muted);
+    }
+
+/* ============================================================
+   Sort controls
+   ============================================================ */
+.sort-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+    margin-bottom: 0.8em;
+    flex-wrap: wrap;
+}
+
+.sort-controls__label {
+    font-size: 0.85em;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+select {
+    background: var(--bg-page);
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+    border-radius: 4px;
+    padding: 0.4em 0.6em;
+    font-size: 0.9em;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+    select:hover {
+        border-color: var(--border-strong);
+    }
+
+.sort-dir-btn {
+    background: transparent;
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+    padding: 0.4em 0.7em;
+    font-size: 0.9em;
+    min-width: 2.4em;
+}
+
+    .sort-dir-btn:hover:not(:disabled) {
+        background: var(--bg-subtle);
+    }
+
+/* ============================================================
+   Skeleton row variant for building list (sized to match rows)
+   ============================================================ */
+.skeleton-row--building {
+    height: 2.4em;
+    margin: 0;
+    border-radius: 0;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+    .skeleton-row--building:last-child {
+        border-bottom: none;
+    }
