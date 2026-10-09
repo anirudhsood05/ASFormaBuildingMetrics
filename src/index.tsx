@@ -1,12 +1,18 @@
-﻿import { render } from 'preact';
+import { render } from 'preact';
 import './style.css';
 import { Forma } from "forma-embedded-view-sdk/auto";
 import { useState, useEffect, useMemo } from "preact/hooks";
-import { RgbaColor } from "powerful-color-picker";
 
 // =============================================================
 // TYPES
 // =============================================================
+interface RgbaColor {
+    r: number;
+    g: number;
+    b: number;
+    a: number;
+}
+
 interface BuildingData {
     path: string;
     buildingName: string;

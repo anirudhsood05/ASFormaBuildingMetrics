@@ -1,19 +1,20 @@
 {
+	"name": "as-forma-building-metrics",
 	"private": true,
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
-		"build": "vite build",
+		"typecheck": "tsc --noEmit",
+		"build": "tsc --noEmit && vite build",
 		"preview": "vite preview"
 	},
 	"dependencies": {
-		"forma-embedded-view-sdk": "^0.89.0",
-		"powerful-color-picker": "^2.6.1",
-		"preact": "^10.26.9"
+		"forma-embedded-view-sdk": "^0.96.0",
+		"preact": "^10.29.8"
 	},
 	"devDependencies": {
 		"@preact/preset-vite": "^2.10.2",
 		"typescript": "^5.9.3",
-		"vite": "^7.0.4"
+		"vite": "^7.3.7"
 	}
 }

@@ -6,19 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is an **Autodesk Forma embedded panel** — a Preact + Vite + TypeScript app that runs inside the Forma urban design tool as a side panel. It reads building geometry from the active Forma scene, computes metrics, and applies per-building color overlays.
 
-The actual source lives one level deeper: `ASFormaBuildingMetrics/ASFormaBuildingMetrics/`.
 
 ## Commands
 
-All commands must be run from `ASFormaBuildingMetrics/ASFormaBuildingMetrics/`:
+All commands run from the repository root:
 
 ```bash
 npm run dev       # Dev server at http://localhost:5173/
-npm run build     # Production build → dist/
+npm run typecheck # tsc --noEmit
+npm run build     # Type-check, then production build → dist/
 npm run preview   # Preview production build at http://localhost:4173/
 ```
 
-There is no test runner or linter configured. TypeScript type-checking is `tsc --noEmit` (or via editor integration using `tsconfig.json`).
+There is no test runner or linter configured. `npm run build` fails on TypeScript errors.
 
 ## Architecture
 
