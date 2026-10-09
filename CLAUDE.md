@@ -20,6 +20,8 @@ npm run preview   # Preview production build at http://localhost:4173/
 
 There is no test runner or linter configured. `npm run build` fails on TypeScript errors.
 
+**Deployment**: `.github/workflows/deploy.yml` builds every PR and deploys `main` to GitHub Pages. `vite.config.ts` uses `base: './'` so the build works from the Pages sub-path.
+
 ## Architecture
 
 Everything lives in a single file: `src/index.tsx`. There is no routing, no state management library, and no component folder — the entire application is one ~770-line file rendered with Preact.
