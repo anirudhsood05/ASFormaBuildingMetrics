@@ -1,21 +1,28 @@
-﻿import { render } from 'preact';
+import { render } from 'preact';
 import './style.css';
 import { Forma } from "forma-embedded-view-sdk/auto";
 import { useState, useEffect, useMemo } from "preact/hooks";
-import { RgbaColor } from "powerful-color-picker";
 
 // =============================================================
 // TYPES
 // =============================================================
+interface RgbaColor {
+    r: number;
+    g: number;
+    b: number;
+    a: number;
+}
+
 interface BuildingData {
     path: string;
-    buildingName: string;
     height: number;
     footprintArea: number;
     volume: number;
     floorCount: number;
-    far: number;
     buildingUse: string;
+    /** Bounding-box centre and largest dimension, used to frame the camera. */
+    centre: { x: number; y: number; z: number };
+    size: number;
     north: number;
     south: number;
     east: number;
@@ -26,15 +33,18 @@ interface BuildingData {
 
 type ColorMode =
     | 'height' | 'area' | 'volume' | 'floors'
-    | 'use' | 'far' | 'facadeDominant' | 'facadeMixed';
+    | 'use' | 'facadeDominant' | 'facadeMixed';
 
 type TabId = 'metrics' | 'analysis' | 'export';
 type SortKey = 'index' | 'height' | 'area' | 'floors';
 type SortDir = 'asc' | 'desc';
 
 // =============================================================
-// COLOR SCHEMES & HELPERS (unchanged)
+// COLOR SCHEMES & HELPERS
 // =============================================================
+/** Assumed floor-to-floor height used for floor-count estimates. */
+const FLOOR_TO_FLOOR_M = 3.5;
+
 const ORIENTATION_COLORS = {
     North: { r: 100, g: 149, b: 237, a: 1 },
     South: { r: 255, g: 140, b: 0, a: 1 },
@@ -70,14 +80,6 @@ const getColorByFloorCount = (floors: number): RgbaColor => {
     return { r: 178, g: 34, b: 34, a: 1 };
 };
 
-const getColorByFAR = (far: number): RgbaColor => {
-    if (far < 1.0) return { r: 255, g: 250, b: 205, a: 1 };
-    if (far < 2.0) return { r: 255, g: 215, b: 0, a: 1 };
-    if (far < 3.0) return { r: 255, g: 140, b: 0, a: 1 };
-    if (far < 5.0) return { r: 255, g: 69, b: 0, a: 1 };
-    return { r: 178, g: 34, b: 34, a: 1 };
-};
-
 const getColorByUse = (use: string): RgbaColor => {
     const u = use.toLowerCase();
     if (u.includes('residential') || u.includes('apartments')) return { r: 144, g: 238, b: 144, a: 1 };
@@ -89,6 +91,10 @@ const getColorByUse = (use: string): RgbaColor => {
     if (u.includes('mixed')) return { r: 255, g: 140, b: 0, a: 1 };
     return { r: 211, g: 211, b: 211, a: 1 };
 };
+
+/** sRGB hex string, as expected by Forma.render.elementColors. */
+const toHex = ({ r, g, b }: RgbaColor): string =>
+    '#' + [r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('');
 
 const calculatePolygonArea = (coordinates: [number, number][]): number => {
     let area = 0;
@@ -138,13 +144,14 @@ const getOrientation = (normal: [number, number, number]): 'North' | 'South' | '
 };
 
 // =============================================================
-// SUMMARY STRIP (unchanged from Pass 1)
+// SUMMARY STRIP
+// GFA, site area and coverage are left to Forma's Area Metrics panel.
 // =============================================================
 function SummaryStrip({
-    totalBuildings, totalGFA, siteArea, avgHeight, isLoading,
+    totalBuildings, avgHeight, maxHeight, facadeArea, isLoading,
 }: {
-    totalBuildings: number; totalGFA: number; siteArea: number;
-    avgHeight: number; isLoading: boolean;
+    totalBuildings: number; avgHeight: number; maxHeight: number;
+    facadeArea: number; isLoading: boolean;
 }) {
     const fmt = (n: number) => {
         if (!isFinite(n) || isNaN(n)) return '—';
@@ -161,21 +168,21 @@ function SummaryStrip({
                 <div class="summary-stat__value">{placeholder ?? totalBuildings}</div>
             </div>
             <div class="summary-stat">
-                <div class="summary-stat__label">Total GFA</div>
-                <div class="summary-stat__value">
-                    {placeholder ?? fmt(totalGFA)}<span class="summary-stat__unit">m²</span>
-                </div>
-            </div>
-            <div class="summary-stat">
-                <div class="summary-stat__label">Site Area</div>
-                <div class="summary-stat__value">
-                    {placeholder ?? fmt(siteArea)}<span class="summary-stat__unit">m²</span>
-                </div>
-            </div>
-            <div class="summary-stat">
                 <div class="summary-stat__label">Avg Height</div>
                 <div class="summary-stat__value">
                     {placeholder ?? avgHeight.toFixed(1)}<span class="summary-stat__unit">m</span>
+                </div>
+            </div>
+            <div class="summary-stat">
+                <div class="summary-stat__label">Max Height</div>
+                <div class="summary-stat__value">
+                    {placeholder ?? maxHeight.toFixed(1)}<span class="summary-stat__unit">m</span>
+                </div>
+            </div>
+            <div class="summary-stat">
+                <div class="summary-stat__label">Façade Area</div>
+                <div class="summary-stat__value">
+                    {placeholder ?? fmt(facadeArea)}<span class="summary-stat__unit">m²</span>
                 </div>
             </div>
         </div>
@@ -260,7 +267,7 @@ function BuildingList({
 }: {
     buildings: BuildingData[];
     selectedPath: string | null;
-    onSelect: (path: string) => void;
+    onSelect: (building: BuildingData) => void;
 }) {
     if (buildings.length === 0) {
         return (
@@ -278,7 +285,8 @@ function BuildingList({
                 <div
                     key={b.path}
                     class={`building-row ${selectedPath === b.path ? 'building-row--selected' : ''}`}
-                    onClick={() => onSelect(b.path)}
+                    onClick={() => onSelect(b)}
+                    title="Move camera to this building"
                 >
                     <div class="building-row__index">#{i + 1}</div>
                     <div class="building-row__metric">
@@ -351,22 +359,31 @@ function App() {
             try {
                 const paths = await Forma.geometry.getPathsByCategory({ category: "building" });
 
-                const dataPromises = paths.map(async (path, index) => {
+                const dataPromises = paths.map(async (path): Promise<BuildingData> => {
                     const position = await Forma.geometry.getTriangles({ path });
 
-                    const zValues = [];
-                    for (let i = 2; i < position.length; i += 3) zValues.push(position[i]);
-                    const minZ = Math.min(...zValues);
-                    const maxZ = Math.max(...zValues);
-                    const height = maxZ - minZ;
+                    // Bounding box in one pass (spreading large vertex arrays into
+                    // Math.min/max can overflow the call stack on detailed meshes).
+                    let minX = Infinity, minY = Infinity, minZ = Infinity;
+                    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+                    for (let i = 0; i < position.length; i += 3) {
+                        const x = position[i], y = position[i + 1], z = position[i + 2];
+                        if (x < minX) minX = x; if (x > maxX) maxX = x;
+                        if (y < minY) minY = y; if (y > maxY) maxY = y;
+                        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+                    }
+                    const height = position.length > 0 ? maxZ - minZ : 0;
+                    const centre = position.length > 0
+                        ? { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: (minZ + maxZ) / 2 }
+                        : { x: 0, y: 0, z: 0 };
+                    const size = position.length > 0 ? Math.max(maxX - minX, maxY - minY, height) : 0;
 
                     const footprint = await Forma.geometry.getFootprint({ path });
                     const footprintArea = footprint ? calculatePolygonArea(footprint.coordinates) : 0;
 
+                    // Estimates: extruded footprint and an assumed 3.5 m floor-to-floor height.
                     const volume = height * footprintArea;
-                    const floorCount = Math.round(height / 3.5);
-                    const gfa = volume / 3.5;
-                    const far = footprintArea > 0 ? gfa / footprintArea : 0;
+                    const floorCount = Math.round(height / FLOOR_TO_FLOOR_M);
 
                     const buildingUse = buildingUseTags.get(path) || 'unknown';
 
@@ -396,8 +413,8 @@ function App() {
                     if (west > maxArea) { maxArea = west; dominantOrientation = 'West'; }
 
                     return {
-                        path, buildingName: `Building ${index + 1}`,
-                        height, footprintArea, volume, floorCount, far, buildingUse,
+                        path, height, footprintArea, volume, floorCount, buildingUse,
+                        centre, size,
                         north, south, east, west, totalFacadeArea, dominantOrientation
                     };
                 });
@@ -431,28 +448,36 @@ function App() {
         }
     };
 
+    const getBuildingColor = (building: BuildingData): RgbaColor => {
+        switch (colorMode) {
+            case 'height': return getColorByHeight(building.height);
+            case 'area': return getColorByArea(building.footprintArea);
+            case 'volume': return getColorByVolume(building.volume);
+            case 'floors': return getColorByFloorCount(building.floorCount);
+            case 'use': return getColorByUse(buildingUseTags.get(building.path) || 'unknown');
+            case 'facadeDominant': return ORIENTATION_COLORS[building.dominantOrientation];
+            default: return { r: 200, g: 200, b: 200, a: 1 };
+        }
+    };
+
+    // Colours every building in the proposal; no Forma selection needed.
     const colorBuildings = async () => {
         setIsColoring(true);
         setErrorMessage(null);
         try {
-            const selectedPaths = await Forma.selection.getSelection();
-
-            for (let path of selectedPaths) {
-                const building = buildingData.find(b => b.path === path);
-                if (!building) continue;
-
-                const position = await Forma.geometry.getTriangles({ path });
-                const numTriangles = position.length / 9;
-                const color = new Uint8Array(numTriangles * 4 * 3);
-                let colorIndex = 0;
-
-                if (colorMode === 'facadeMixed') {
+            if (colorMode === 'facadeMixed') {
+                // Per-face colours need a coloured overlay mesh per building;
+                // element colours only support one colour per building.
+                await Forma.render.elementColors.clearAll();
+                for (const building of buildingData) {
+                    const position = await Forma.geometry.getTriangles({ path: building.path });
+                    const color = new Uint8Array((position.length / 9) * 4 * 3);
+                    let colorIndex = 0;
                     for (let i = 0; i < position.length; i += 9) {
                         const v1: [number, number, number] = [position[i], position[i + 1], position[i + 2]];
                         const v2: [number, number, number] = [position[i + 3], position[i + 4], position[i + 5]];
                         const v3: [number, number, number] = [position[i + 6], position[i + 7], position[i + 8]];
-                        const normal = calculateNormal(v1, v2, v3);
-                        const orientation = getOrientation(normal);
+                        const orientation = getOrientation(calculateNormal(v1, v2, v3));
                         const faceColor = orientation ? ORIENTATION_COLORS[orientation] : { r: 200, g: 200, b: 200, a: 1 };
                         for (let v = 0; v < 3; v++) {
                             color[colorIndex++] = faceColor.r;
@@ -461,66 +486,64 @@ function App() {
                             color[colorIndex++] = Math.round(faceColor.a * 255);
                         }
                     }
-                } else {
-                    let buildingColor: RgbaColor;
-                    switch (colorMode) {
-                        case 'height': buildingColor = getColorByHeight(building.height); break;
-                        case 'area': buildingColor = getColorByArea(building.footprintArea); break;
-                        case 'volume': buildingColor = getColorByVolume(building.volume); break;
-                        case 'floors': buildingColor = getColorByFloorCount(building.floorCount); break;
-                        case 'use': buildingColor = getColorByUse(buildingUseTags.get(building.path) || 'unknown'); break;
-                        case 'far': buildingColor = getColorByFAR(building.far); break;
-                        case 'facadeDominant': buildingColor = ORIENTATION_COLORS[building.dominantOrientation]; break;
-                        default: buildingColor = { r: 200, g: 200, b: 200, a: 1 };
-                    }
-                    for (let i = 0; i < numTriangles; i += 1) {
-                        for (let v = 0; v < 3; v++) {
-                            color[colorIndex++] = buildingColor.r;
-                            color[colorIndex++] = buildingColor.g;
-                            color[colorIndex++] = buildingColor.b;
-                            color[colorIndex++] = Math.round(buildingColor.a * 255);
-                        }
-                    }
+                    await Forma.render.updateMesh({ id: building.path, geometryData: { position, color } });
                 }
-
-                Forma.render.updateMesh({ id: path, geometryData: { position, color } });
+            } else {
+                await Forma.render.cleanup();
+                const pathsToColor = new Map<string, string>();
+                for (const building of buildingData) {
+                    pathsToColor.set(building.path, toHex(getBuildingColor(building)));
+                }
+                await Forma.render.elementColors.set({ pathsToColor });
             }
         } catch (error) {
             console.error(error);
-            setErrorMessage('Failed to apply colors to selected buildings.');
+            setErrorMessage('Failed to apply colours to buildings.');
         } finally {
             setIsColoring(false);
         }
     };
 
-    const reset = () => {
-        Forma.render.cleanup();
+    const reset = async () => {
         setSelectedBuilding(null);
-    };
-
-    const selectBuilding = async (path: string) => {
         try {
-            setSelectedBuilding(path);
-            await Forma.selection.setSelection({ selection: [path] });
-            const position = await Forma.geometry.getTriangles({ path });
-            const numTriangles = position.length / 9;
-            const color = new Uint8Array(numTriangles * 4 * 3).fill(255);
-            await Forma.render.updateMesh({ id: path, geometryData: { position, color } });
-            setTimeout(() => { Forma.render.cleanup(); }, 500);
+            await Promise.all([Forma.render.elementColors.clearAll(), Forma.render.cleanup()]);
         } catch (error) {
             console.error(error);
-            setErrorMessage('Failed to select building.');
+            setErrorMessage('Failed to reset colours.');
+        }
+    };
+
+    // The SDK cannot set the Forma selection, so a row click frames the building instead.
+    const focusBuilding = async (building: BuildingData) => {
+        setSelectedBuilding(building.path);
+        const { centre } = building;
+        const distance = Math.max(building.size, 20) * 1.5;
+        try {
+            await Forma.camera.move({
+                position: { x: centre.x - distance, y: centre.y - distance, z: centre.z + distance },
+                target: centre,
+                transitionTimeMs: 800,
+            });
+        } catch (error) {
+            console.error(error);
+            setErrorMessage('Failed to move the camera to the building.');
         }
     };
 
     // --------- DERIVED VALUES ---------
+    const facadeTotals = useMemo(() => buildingData.reduce((acc, b) => ({
+        north: acc.north + b.north, south: acc.south + b.south,
+        east: acc.east + b.east, west: acc.west + b.west,
+        total: acc.total + b.totalFacadeArea
+    }), { north: 0, south: 0, east: 0, west: 0, total: 0 }), [buildingData]);
+
     const summary = useMemo(() => {
         const totalBuildings = buildingData.length;
-        const totalGFA = buildingData.reduce((acc, b) => acc + b.volume / 3.5, 0);
-        const siteArea = buildingData.reduce((acc, b) => acc + b.footprintArea, 0);
         const avgHeight = totalBuildings > 0
             ? buildingData.reduce((acc, b) => acc + b.height, 0) / totalBuildings : 0;
-        return { totalBuildings, totalGFA, siteArea, avgHeight };
+        const maxHeight = buildingData.reduce((acc, b) => Math.max(acc, b.height), 0);
+        return { totalBuildings, avgHeight, maxHeight };
     }, [buildingData]);
 
     // NEW: sorted building list (original order preserved in state)
@@ -541,12 +564,6 @@ function App() {
         return arr;
     }, [buildingData, sortKey, sortDir]);
 
-    const facadeTotals = buildingData.reduce((acc, b) => ({
-        north: acc.north + b.north, south: acc.south + b.south,
-        east: acc.east + b.east, west: acc.west + b.west,
-        total: acc.total + b.totalFacadeArea
-    }), { north: 0, south: 0, east: 0, west: 0, total: 0 });
-
     const formatArea = (area: number) => area.toFixed(1);
     const formatPercent = (area: number, total: number) =>
         total > 0 ? ((area / total) * 100).toFixed(1) : '0.0';
@@ -560,9 +577,9 @@ function App() {
 
             <SummaryStrip
                 totalBuildings={summary.totalBuildings}
-                totalGFA={summary.totalGFA}
-                siteArea={summary.siteArea}
                 avgHeight={summary.avgHeight}
+                maxHeight={summary.maxHeight}
+                facadeArea={facadeTotals.total}
                 isLoading={isLoading}
             />
 
@@ -582,23 +599,26 @@ function App() {
                             : <BuildingList
                                 buildings={sortedBuildings}
                                 selectedPath={selectedBuilding}
-                                onSelect={selectBuilding}
+                                onSelect={focusBuilding}
                             />
                         }
+                        <p class="muted">
+                            Click a building to move the camera to it. Floors and volume are
+                            estimates ({FLOOR_TO_FLOOR_M} m floor-to-floor, extruded footprint).
+                            For GFA, site area and FAR use Forma's Area Metrics panel.
+                        </p>
                     </div>
 
-                    {/* --- Visualization controls stay here until Pass 3 moves them to Analysis tab --- */}
                     {!isLoading && (
                         <>
                             <div class="section">
-                                <h3>Visualization Mode</h3>
+                                <h3>Colour Mode</h3>
                                 <div class="row row--wrap">
                                     {([
                                         ['height', 'Height'],
-                                        ['area', 'Area'],
-                                        ['volume', 'Volume'],
-                                        ['floors', 'Floors'],
-                                        ['far', 'FAR'],
+                                        ['area', 'Footprint'],
+                                        ['volume', 'Volume (est.)'],
+                                        ['floors', 'Floors (est.)'],
                                         ['use', 'Use'],
                                         ['facadeDominant', 'Façade (Dominant)'],
                                         ['facadeMixed', 'Façade (Mixed)'],
@@ -625,7 +645,7 @@ function App() {
                             )}
                             {colorMode === 'area' && (
                                 <div class="section">
-                                    <h3>Area Legend</h3>
+                                    <h3>Footprint Area Legend</h3>
                                     <LegendSwatch color="rgb(173, 216, 230)" label="Small (<100 m²)" />
                                     <LegendSwatch color="rgb(100, 149, 237)" label="Medium (100–500 m²)" />
                                     <LegendSwatch color="rgb(65, 105, 225)" label="Large (500–1000 m²)" />
@@ -634,7 +654,7 @@ function App() {
                             )}
                             {colorMode === 'volume' && (
                                 <div class="section">
-                                    <h3>Volume Legend</h3>
+                                    <h3>Volume Legend (estimated)</h3>
                                     <LegendSwatch color="rgb(255, 182, 193)" label="Small (<1000 m³)" />
                                     <LegendSwatch color="rgb(255, 105, 180)" label="Medium (1000–5000 m³)" />
                                     <LegendSwatch color="rgb(199, 21, 133)" label="Large (5000–15000 m³)" />
@@ -643,21 +663,11 @@ function App() {
                             )}
                             {colorMode === 'floors' && (
                                 <div class="section">
-                                    <h3>Floor Count Legend</h3>
+                                    <h3>Floor Count Legend (estimated)</h3>
                                     <LegendSwatch color="rgb(144, 238, 144)" label="Low-rise (1–2 floors)" />
                                     <LegendSwatch color="rgb(34, 139, 34)" label="Mid-rise (3–6 floors)" />
                                     <LegendSwatch color="rgb(255, 140, 0)" label="High-rise (7–14 floors)" />
                                     <LegendSwatch color="rgb(178, 34, 34)" label="Tower (15+ floors)" />
-                                </div>
-                            )}
-                            {colorMode === 'far' && (
-                                <div class="section">
-                                    <h3>FAR Legend</h3>
-                                    <LegendSwatch color="rgb(255, 250, 205)" label="Very Low (<1.0)" />
-                                    <LegendSwatch color="rgb(255, 215, 0)" label="Low (1.0–2.0)" />
-                                    <LegendSwatch color="rgb(255, 140, 0)" label="Medium (2.0–3.0)" />
-                                    <LegendSwatch color="rgb(255, 69, 0)" label="High (3.0–5.0)" />
-                                    <LegendSwatch color="rgb(178, 34, 34)" label="Very High (5.0+)" />
                                 </div>
                             )}
                             {colorMode === 'use' && (
@@ -706,13 +716,13 @@ function App() {
                                         <LegendSwatch color="rgb(186, 85, 211)" label="West" />
                                     </div>
                                     <div class="section">
-                                        <h3>Overall Facade Statistics</h3>
+                                        <h3>Overall Façade Statistics</h3>
                                         <div><strong>North:</strong> {formatArea(facadeTotals.north)} m² ({formatPercent(facadeTotals.north, facadeTotals.total)}%)</div>
                                         <div><strong>South:</strong> {formatArea(facadeTotals.south)} m² ({formatPercent(facadeTotals.south, facadeTotals.total)}%)</div>
                                         <div><strong>East:</strong> {formatArea(facadeTotals.east)} m² ({formatPercent(facadeTotals.east, facadeTotals.total)}%)</div>
                                         <div><strong>West:</strong> {formatArea(facadeTotals.west)} m² ({formatPercent(facadeTotals.west, facadeTotals.total)}%)</div>
                                         <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)' }}>
-                                            <strong>Total Facade Area:</strong> {formatArea(facadeTotals.total)} m²
+                                            <strong>Total Façade Area:</strong> {formatArea(facadeTotals.total)} m²
                                         </div>
                                     </div>
                                 </>
@@ -720,8 +730,8 @@ function App() {
 
                             <div class="section">
                                 <div class="row">
-                                    <button onClick={colorBuildings} disabled={isLoading || isColoring}>
-                                        {isColoring ? <><span class="spinner">⟳</span> Coloring…</> : 'Apply Colors'}
+                                    <button onClick={colorBuildings} disabled={isLoading || isColoring || buildingData.length === 0}>
+                                        {isColoring ? <><span class="spinner">⟳</span> Colouring…</> : 'Apply Colours to All Buildings'}
                                     </button>
                                     <button class="button-ghost" onClick={reset}>Reset</button>
                                 </div>
