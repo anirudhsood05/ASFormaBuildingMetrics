@@ -10,8 +10,9 @@ Area figures already reported by Forma's own Area Metrics panel (gross floor are
 
 1. Open the panel in Forma. All buildings load into the list.
 2. Pick a colour mode and click **Apply colours**. Every building in the proposal is coloured.
-3. Click a building in the list to move the camera to it.
+3. Click a building in the list to see all its values and move the camera to it.
 4. Click **Reset** to remove the colours.
+5. Under **Export**, click **Download CSV**, or **Copy Table** and paste into Excel. Forma may block downloads from its panel; Copy Table is the fallback.
 
 Estimates and assumptions:
 

@@ -24,7 +24,7 @@ There is no test runner or linter configured. `npm run build` fails on TypeScrip
 
 ## Architecture
 
-Everything lives in a single file: `src/index.tsx`. There is no routing, no state management library, and no component folder — the entire application is one ~770-line file rendered with Preact.
+Everything lives in a single file: `src/index.tsx`. There is no routing, no state management library, and no component folder — the entire application is one ~880-line file rendered with Preact.
 
 **Forma SDK integration** (`forma-embedded-view-sdk/auto`):
 - `Forma.geometry.getPathsByCategory({ category: "building" })` — enumerate building paths in the scene
@@ -48,8 +48,8 @@ Everything lives in a single file: `src/index.tsx`. There is no routing, no stat
 
 **UI structure**:
 - `SummaryStrip` — always-visible aggregate stats (building count, avg height, max height, total façade area)
-- `TabBar` — switches between Metrics / Analysis / Export tabs (Analysis and Export are placeholders)
-- Metrics tab: `BuildingList` with `SortControls`, then visualization mode selector buttons, context-sensitive legend, and color action buttons
+- Single screen, no tabs: `BuildingList` with `SortControls` (each building has a stable `number` in load order, shown as "#3" / "Building 3"), `BuildingDetail` for the clicked building, colour mode buttons, context-sensitive legend, colour action buttons, then Export
+- Export: `buildExportRows` → `toCsv` (download via Blob, with a UTF-8 BOM for Excel) or `toTsv` (clipboard, with an `execCommand` fallback because the Clipboard API is often blocked in iframes)
 - `style.css` — design-token–based CSS (CSS custom properties for light/dark mode, no CSS framework)
 
 **Important constraint**: The app cannot be meaningfully tested in a standalone browser — `Forma.*` API calls will fail without the Forma host environment. Development and testing requires loading the dev server URL inside Forma's embedded view panel.

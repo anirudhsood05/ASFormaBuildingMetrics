@@ -15,6 +15,8 @@ interface RgbaColor {
 
 interface BuildingData {
     path: string;
+    /** Stable 1-based number in load order, used as the building's label. */
+    number: number;
     height: number;
     footprintArea: number;
     volume: number;
@@ -35,7 +37,6 @@ type ColorMode =
     | 'height' | 'area' | 'volume' | 'floors'
     | 'use' | 'facadeDominant' | 'facadeMixed';
 
-type TabId = 'metrics' | 'analysis' | 'export';
 type SortKey = 'index' | 'height' | 'area' | 'floors';
 type SortDir = 'asc' | 'desc';
 
@@ -190,30 +191,6 @@ function SummaryStrip({
 }
 
 // =============================================================
-// TAB BAR
-// =============================================================
-function TabBar({ activeTab, setActiveTab }: { activeTab: TabId; setActiveTab: (t: TabId) => void }) {
-    const tabs: { id: TabId; label: string }[] = [
-        { id: 'metrics', label: 'Metrics' },
-        { id: 'analysis', label: 'Analysis' },
-        { id: 'export', label: 'Export' },
-    ];
-    return (
-        <div class="tab-bar">
-            {tabs.map((t) => (
-                <button
-                    key={t.id}
-                    class={`tab ${activeTab === t.id ? 'tab--active' : ''}`}
-                    onClick={() => setActiveTab(t.id)}
-                >
-                    {t.label}
-                </button>
-            ))}
-        </div>
-    );
-}
-
-// =============================================================
 // ERROR BANNER
 // =============================================================
 function ErrorBanner({ message }: { message: string }) {
@@ -281,14 +258,14 @@ function BuildingList({
 
     return (
         <div class="building-list">
-            {buildings.map((b, i) => (
+            {buildings.map((b) => (
                 <div
                     key={b.path}
                     class={`building-row ${selectedPath === b.path ? 'building-row--selected' : ''}`}
                     onClick={() => onSelect(b)}
-                    title="Move camera to this building"
+                    title={`Building ${b.number}: show details and move camera`}
                 >
-                    <div class="building-row__index">#{i + 1}</div>
+                    <div class="building-row__index">#{b.number}</div>
                     <div class="building-row__metric">
                         <span class="building-row__metric-label">H</span>
                         {b.height.toFixed(1)}m
@@ -332,6 +309,102 @@ function LegendSwatch({ color, label }: { color: string; label: string }) {
     );
 }
 
+const formatArea = (area: number) => area.toFixed(1);
+const formatPercent = (area: number, total: number) =>
+    total > 0 ? ((area / total) * 100).toFixed(1) : '0.0';
+
+// =============================================================
+// BUILDING DETAIL - every value for the selected building
+// =============================================================
+function BuildingDetail({ building }: { building: BuildingData }) {
+    const b = building;
+    const c = ORIENTATION_COLORS[b.dominantOrientation];
+    const facade: [string, number][] = [
+        ['North', b.north], ['South', b.south], ['East', b.east], ['West', b.west],
+    ];
+    return (
+        <div class="building-detail">
+            <h3>Building {b.number}</h3>
+            <div class="building-detail__grid">
+                <div><span class="muted">Height</span> {b.height.toFixed(1)} m</div>
+                <div><span class="muted">Footprint</span> {b.footprintArea.toFixed(0)} m²</div>
+                <div><span class="muted">Floors (est.)</span> {b.floorCount}</div>
+                <div><span class="muted">Volume (est.)</span> {b.volume.toFixed(0)} m³</div>
+                <div><span class="muted">Use</span> {b.buildingUse}</div>
+                <div>
+                    <span class="muted">Dominant façade</span>{' '}
+                    <span class="orientation-chip" style={{ backgroundColor: `rgb(${c.r}, ${c.g}, ${c.b})` }}>
+                        {b.dominantOrientation}
+                    </span>
+                </div>
+            </div>
+            <div class="building-detail__facade">
+                {facade.map(([label, area]) => (
+                    <div key={label}>
+                        <span class="muted">{label}</span> {formatArea(area)} m² ({formatPercent(area, b.totalFacadeArea)}%)
+                    </div>
+                ))}
+                <div><span class="muted">Total façade</span> {formatArea(b.totalFacadeArea)} m²</div>
+            </div>
+        </div>
+    );
+}
+
+// =============================================================
+// EXPORT HELPERS
+// =============================================================
+const EXPORT_HEADER = [
+    'Building', 'Height (m)', 'Footprint (m²)', 'Floors (est.)', 'Volume (est., m³)', 'Use',
+    'North façade (m²)', 'South façade (m²)', 'East façade (m²)', 'West façade (m²)',
+    'Total façade (m²)', 'Dominant orientation',
+];
+
+const buildExportRows = (buildings: BuildingData[]): string[][] => [
+    EXPORT_HEADER,
+    ...[...buildings].sort((a, b) => a.number - b.number).map((b) => [
+        `Building ${b.number}`, b.height.toFixed(1), b.footprintArea.toFixed(1),
+        String(b.floorCount), b.volume.toFixed(0), b.buildingUse,
+        formatArea(b.north), formatArea(b.south), formatArea(b.east), formatArea(b.west),
+        formatArea(b.totalFacadeArea), b.dominantOrientation,
+    ]),
+];
+
+const toCsv = (rows: string[][]): string =>
+    rows.map((r) => r.map((v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v)).join(',')).join('\r\n');
+
+// Tab-separated text pastes straight into Excel columns.
+const toTsv = (rows: string[][]): string => rows.map((r) => r.join('\t')).join('\n');
+
+const downloadCsv = (csv: string) => {
+    // The BOM makes Excel read m² and ç correctly.
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `building-metrics-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+const copyText = async (text: string) => {
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch {
+        // The Clipboard API is often blocked inside embedded iframes; fall back to execCommand.
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand('copy');
+        textarea.remove();
+        if (!ok) throw new Error('Copy command was rejected');
+    }
+};
+
 // =============================================================
 // MAIN APP
 // =============================================================
@@ -344,12 +417,12 @@ function App() {
     const [selectedUse, setSelectedUse] = useState<string>('residential');
     const [buildingUseTags, setBuildingUseTags] = useState<Map<string, string>>(new Map());
 
-    const [activeTab, setActiveTab] = useState<TabId>('metrics');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [exportMessage, setExportMessage] = useState<string | null>(null);
 
     // NEW in Pass 2: sort state
     const [sortKey, setSortKey] = useState<SortKey>('index');
-    const [sortDir, setSortDir] = useState<SortDir>('desc');
+    const [sortDir, setSortDir] = useState<SortDir>('asc');
 
     // --------- ANALYSIS PIPELINE (unchanged) ---------
     useEffect(() => {
@@ -359,7 +432,7 @@ function App() {
             try {
                 const paths = await Forma.geometry.getPathsByCategory({ category: "building" });
 
-                const dataPromises = paths.map(async (path): Promise<BuildingData> => {
+                const dataPromises = paths.map(async (path, index): Promise<BuildingData> => {
                     const position = await Forma.geometry.getTriangles({ path });
 
                     // Bounding box in one pass (spreading large vertex arrays into
@@ -413,7 +486,7 @@ function App() {
                     if (west > maxArea) { maxArea = west; dominantOrientation = 'West'; }
 
                     return {
-                        path, height, footprintArea, volume, floorCount, buildingUse,
+                        path, number: index + 1, height, footprintArea, volume, floorCount, buildingUse,
                         centre, size,
                         north, south, east, west, totalFacadeArea, dominantOrientation
                     };
@@ -564,9 +637,28 @@ function App() {
         return arr;
     }, [buildingData, sortKey, sortDir]);
 
-    const formatArea = (area: number) => area.toFixed(1);
-    const formatPercent = (area: number, total: number) =>
-        total > 0 ? ((area / total) * 100).toFixed(1) : '0.0';
+    const selected = buildingData.find((b) => b.path === selectedBuilding);
+
+    // --------- EXPORT ---------
+    const exportCsv = () => {
+        try {
+            downloadCsv(toCsv(buildExportRows(buildingData)));
+            setExportMessage(`CSV with ${buildingData.length} buildings created. If no download appeared, use Copy Table.`);
+        } catch (error) {
+            console.error(error);
+            setErrorMessage('Failed to create the CSV file. Try Copy Table instead.');
+        }
+    };
+
+    const copyTable = async () => {
+        try {
+            await copyText(toTsv(buildExportRows(buildingData)));
+            setExportMessage(`Copied ${buildingData.length} buildings. Paste into Excel.`);
+        } catch (error) {
+            console.error(error);
+            setErrorMessage('Copying to the clipboard was blocked. Try Download CSV instead.');
+        }
+    };
 
     // =========================================================
     // RENDER
@@ -583,176 +675,169 @@ function App() {
                 isLoading={isLoading}
             />
 
-            <TabBar activeTab={activeTab} setActiveTab={setActiveTab} />
+            <div class="section">
+                <h3>Buildings</h3>
+                <SortControls
+                    sortKey={sortKey} sortDir={sortDir}
+                    setSortKey={setSortKey} setSortDir={setSortDir}
+                />
+                {isLoading
+                    ? <BuildingListSkeleton count={8} />
+                    : <BuildingList
+                        buildings={sortedBuildings}
+                        selectedPath={selectedBuilding}
+                        onSelect={focusBuilding}
+                    />
+                }
+                {selected && <BuildingDetail building={selected} />}
+                <p class="muted">
+                    Click a building to see its details and move the camera to it. Floors and volume are
+                    estimates ({FLOOR_TO_FLOOR_M} m floor-to-floor, extruded footprint).
+                    For GFA, site area and FAR use Forma's Area Metrics panel.
+                </p>
+            </div>
 
-            {/* METRICS TAB */}
-            {activeTab === 'metrics' && (
-                <div>
+            {!isLoading && (
+                <>
                     <div class="section">
-                        <h3>Buildings</h3>
-                        <SortControls
-                            sortKey={sortKey} sortDir={sortDir}
-                            setSortKey={setSortKey} setSortDir={setSortDir}
-                        />
-                        {isLoading
-                            ? <BuildingListSkeleton count={8} />
-                            : <BuildingList
-                                buildings={sortedBuildings}
-                                selectedPath={selectedBuilding}
-                                onSelect={focusBuilding}
-                            />
-                        }
-                        <p class="muted">
-                            Click a building to move the camera to it. Floors and volume are
-                            estimates ({FLOOR_TO_FLOOR_M} m floor-to-floor, extruded footprint).
-                            For GFA, site area and FAR use Forma's Area Metrics panel.
-                        </p>
+                        <h3>Colour Mode</h3>
+                        <div class="row row--wrap">
+                            {([
+                                ['height', 'Height'],
+                                ['area', 'Footprint'],
+                                ['volume', 'Volume (est.)'],
+                                ['floors', 'Floors (est.)'],
+                                ['use', 'Use'],
+                                ['facadeDominant', 'Façade (Dominant)'],
+                                ['facadeMixed', 'Façade (Mixed)'],
+                            ] as [ColorMode, string][]).map(([mode, label]) => (
+                                <button
+                                    key={mode}
+                                    class={`button-ghost ${colorMode === mode ? 'is-active' : ''}`}
+                                    onClick={() => setColorMode(mode)}
+                                >
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
                     </div>
 
-                    {!isLoading && (
+                    {colorMode === 'height' && (
+                        <div class="section">
+                            <h3>Height Legend</h3>
+                            <LegendSwatch color="rgb(33, 71, 55)" label="Low (0–10m)" />
+                            <LegendSwatch color="rgb(85, 107, 47)" label="Medium (10–30m)" />
+                            <LegendSwatch color="rgb(189, 132, 59)" label="High (30–50m)" />
+                            <LegendSwatch color="rgb(225, 169, 94)" label="Very High (50m+)" />
+                        </div>
+                    )}
+                    {colorMode === 'area' && (
+                        <div class="section">
+                            <h3>Footprint Area Legend</h3>
+                            <LegendSwatch color="rgb(173, 216, 230)" label="Small (<100 m²)" />
+                            <LegendSwatch color="rgb(100, 149, 237)" label="Medium (100–500 m²)" />
+                            <LegendSwatch color="rgb(65, 105, 225)" label="Large (500–1000 m²)" />
+                            <LegendSwatch color="rgb(25, 25, 112)" label="Very Large (1000 m²+)" />
+                        </div>
+                    )}
+                    {colorMode === 'volume' && (
+                        <div class="section">
+                            <h3>Volume Legend (estimated)</h3>
+                            <LegendSwatch color="rgb(255, 182, 193)" label="Small (<1000 m³)" />
+                            <LegendSwatch color="rgb(255, 105, 180)" label="Medium (1000–5000 m³)" />
+                            <LegendSwatch color="rgb(199, 21, 133)" label="Large (5000–15000 m³)" />
+                            <LegendSwatch color="rgb(139, 0, 139)" label="Very Large (15000 m³+)" />
+                        </div>
+                    )}
+                    {colorMode === 'floors' && (
+                        <div class="section">
+                            <h3>Floor Count Legend (estimated)</h3>
+                            <LegendSwatch color="rgb(144, 238, 144)" label="Low-rise (1–2 floors)" />
+                            <LegendSwatch color="rgb(34, 139, 34)" label="Mid-rise (3–6 floors)" />
+                            <LegendSwatch color="rgb(255, 140, 0)" label="High-rise (7–14 floors)" />
+                            <LegendSwatch color="rgb(178, 34, 34)" label="Tower (15+ floors)" />
+                        </div>
+                    )}
+                    {colorMode === 'use' && (
                         <>
                             <div class="section">
-                                <h3>Colour Mode</h3>
-                                <div class="row row--wrap">
-                                    {([
-                                        ['height', 'Height'],
-                                        ['area', 'Footprint'],
-                                        ['volume', 'Volume (est.)'],
-                                        ['floors', 'Floors (est.)'],
-                                        ['use', 'Use'],
-                                        ['facadeDominant', 'Façade (Dominant)'],
-                                        ['facadeMixed', 'Façade (Mixed)'],
-                                    ] as [ColorMode, string][]).map(([mode, label]) => (
-                                        <button
-                                            key={mode}
-                                            class={`button-ghost ${colorMode === mode ? 'is-active' : ''}`}
-                                            onClick={() => setColorMode(mode)}
-                                        >
-                                            {label}
-                                        </button>
-                                    ))}
-                                </div>
+                                <h3>Building Use Legend</h3>
+                                <LegendSwatch color="rgb(144, 238, 144)" label="Residential" />
+                                <LegendSwatch color="rgb(100, 149, 237)" label="Commercial/Retail" />
+                                <LegendSwatch color="rgb(186, 85, 211)" label="Office" />
+                                <LegendSwatch color="rgb(169, 169, 169)" label="Industrial" />
+                                <LegendSwatch color="rgb(220, 20, 60)" label="Healthcare" />
+                                <LegendSwatch color="rgb(255, 215, 0)" label="Education" />
+                                <LegendSwatch color="rgb(255, 140, 0)" label="Mixed Use" />
+                                <LegendSwatch color="rgb(211, 211, 211)" label="Unknown/Other" />
                             </div>
-
-                            {colorMode === 'height' && (
-                                <div class="section">
-                                    <h3>Height Legend</h3>
-                                    <LegendSwatch color="rgb(33, 71, 55)" label="Low (0–10m)" />
-                                    <LegendSwatch color="rgb(85, 107, 47)" label="Medium (10–30m)" />
-                                    <LegendSwatch color="rgb(189, 132, 59)" label="High (30–50m)" />
-                                    <LegendSwatch color="rgb(225, 169, 94)" label="Very High (50m+)" />
-                                </div>
-                            )}
-                            {colorMode === 'area' && (
-                                <div class="section">
-                                    <h3>Footprint Area Legend</h3>
-                                    <LegendSwatch color="rgb(173, 216, 230)" label="Small (<100 m²)" />
-                                    <LegendSwatch color="rgb(100, 149, 237)" label="Medium (100–500 m²)" />
-                                    <LegendSwatch color="rgb(65, 105, 225)" label="Large (500–1000 m²)" />
-                                    <LegendSwatch color="rgb(25, 25, 112)" label="Very Large (1000 m²+)" />
-                                </div>
-                            )}
-                            {colorMode === 'volume' && (
-                                <div class="section">
-                                    <h3>Volume Legend (estimated)</h3>
-                                    <LegendSwatch color="rgb(255, 182, 193)" label="Small (<1000 m³)" />
-                                    <LegendSwatch color="rgb(255, 105, 180)" label="Medium (1000–5000 m³)" />
-                                    <LegendSwatch color="rgb(199, 21, 133)" label="Large (5000–15000 m³)" />
-                                    <LegendSwatch color="rgb(139, 0, 139)" label="Very Large (15000 m³+)" />
-                                </div>
-                            )}
-                            {colorMode === 'floors' && (
-                                <div class="section">
-                                    <h3>Floor Count Legend (estimated)</h3>
-                                    <LegendSwatch color="rgb(144, 238, 144)" label="Low-rise (1–2 floors)" />
-                                    <LegendSwatch color="rgb(34, 139, 34)" label="Mid-rise (3–6 floors)" />
-                                    <LegendSwatch color="rgb(255, 140, 0)" label="High-rise (7–14 floors)" />
-                                    <LegendSwatch color="rgb(178, 34, 34)" label="Tower (15+ floors)" />
-                                </div>
-                            )}
-                            {colorMode === 'use' && (
-                                <>
-                                    <div class="section">
-                                        <h3>Building Use Legend</h3>
-                                        <LegendSwatch color="rgb(144, 238, 144)" label="Residential" />
-                                        <LegendSwatch color="rgb(100, 149, 237)" label="Commercial/Retail" />
-                                        <LegendSwatch color="rgb(186, 85, 211)" label="Office" />
-                                        <LegendSwatch color="rgb(169, 169, 169)" label="Industrial" />
-                                        <LegendSwatch color="rgb(220, 20, 60)" label="Healthcare" />
-                                        <LegendSwatch color="rgb(255, 215, 0)" label="Education" />
-                                        <LegendSwatch color="rgb(255, 140, 0)" label="Mixed Use" />
-                                        <LegendSwatch color="rgb(211, 211, 211)" label="Unknown/Other" />
-                                    </div>
-                                    <div class="section">
-                                        <h3>Tag Selected Buildings</h3>
-                                        <div class="row">
-                                            <select
-                                                value={selectedUse}
-                                                onChange={(e) => setSelectedUse((e.target as HTMLSelectElement).value)}
-                                            >
-                                                <option value="residential">Residential</option>
-                                                <option value="commercial">Commercial/Retail</option>
-                                                <option value="office">Office</option>
-                                                <option value="industrial">Industrial</option>
-                                                <option value="hospital">Healthcare</option>
-                                                <option value="school">Education</option>
-                                                <option value="mixed">Mixed Use</option>
-                                            </select>
-                                            <button onClick={tagSelectedBuildings}>Tag Selected</button>
-                                        </div>
-                                        <p class="muted">
-                                            Select buildings in Forma, choose use type, then click Tag Selected.
-                                        </p>
-                                    </div>
-                                </>
-                            )}
-                            {(colorMode === 'facadeDominant' || colorMode === 'facadeMixed') && (
-                                <>
-                                    <div class="section">
-                                        <h3>Orientation Legend</h3>
-                                        <LegendSwatch color="rgb(100, 149, 237)" label="North" />
-                                        <LegendSwatch color="rgb(255, 140, 0)" label="South" />
-                                        <LegendSwatch color="rgb(255, 215, 0)" label="East" />
-                                        <LegendSwatch color="rgb(186, 85, 211)" label="West" />
-                                    </div>
-                                    <div class="section">
-                                        <h3>Overall Façade Statistics</h3>
-                                        <div><strong>North:</strong> {formatArea(facadeTotals.north)} m² ({formatPercent(facadeTotals.north, facadeTotals.total)}%)</div>
-                                        <div><strong>South:</strong> {formatArea(facadeTotals.south)} m² ({formatPercent(facadeTotals.south, facadeTotals.total)}%)</div>
-                                        <div><strong>East:</strong> {formatArea(facadeTotals.east)} m² ({formatPercent(facadeTotals.east, facadeTotals.total)}%)</div>
-                                        <div><strong>West:</strong> {formatArea(facadeTotals.west)} m² ({formatPercent(facadeTotals.west, facadeTotals.total)}%)</div>
-                                        <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)' }}>
-                                            <strong>Total Façade Area:</strong> {formatArea(facadeTotals.total)} m²
-                                        </div>
-                                    </div>
-                                </>
-                            )}
-
                             <div class="section">
+                                <h3>Tag Selected Buildings</h3>
                                 <div class="row">
-                                    <button onClick={colorBuildings} disabled={isLoading || isColoring || buildingData.length === 0}>
-                                        {isColoring ? <><span class="spinner">⟳</span> Colouring…</> : 'Apply Colours to All Buildings'}
-                                    </button>
-                                    <button class="button-ghost" onClick={reset}>Reset</button>
+                                    <select
+                                        value={selectedUse}
+                                        onChange={(e) => setSelectedUse((e.target as HTMLSelectElement).value)}
+                                    >
+                                        <option value="residential">Residential</option>
+                                        <option value="commercial">Commercial/Retail</option>
+                                        <option value="office">Office</option>
+                                        <option value="industrial">Industrial</option>
+                                        <option value="hospital">Healthcare</option>
+                                        <option value="school">Education</option>
+                                        <option value="mixed">Mixed Use</option>
+                                    </select>
+                                    <button onClick={tagSelectedBuildings}>Tag Selected</button>
+                                </div>
+                                <p class="muted">
+                                    Select buildings in Forma, choose use type, then click Tag Selected.
+                                </p>
+                            </div>
+                        </>
+                    )}
+                    {(colorMode === 'facadeDominant' || colorMode === 'facadeMixed') && (
+                        <>
+                            <div class="section">
+                                <h3>Orientation Legend</h3>
+                                <LegendSwatch color="rgb(100, 149, 237)" label="North" />
+                                <LegendSwatch color="rgb(255, 140, 0)" label="South" />
+                                <LegendSwatch color="rgb(255, 215, 0)" label="East" />
+                                <LegendSwatch color="rgb(186, 85, 211)" label="West" />
+                            </div>
+                            <div class="section">
+                                <h3>Overall Façade Statistics</h3>
+                                <div><strong>North:</strong> {formatArea(facadeTotals.north)} m² ({formatPercent(facadeTotals.north, facadeTotals.total)}%)</div>
+                                <div><strong>South:</strong> {formatArea(facadeTotals.south)} m² ({formatPercent(facadeTotals.south, facadeTotals.total)}%)</div>
+                                <div><strong>East:</strong> {formatArea(facadeTotals.east)} m² ({formatPercent(facadeTotals.east, facadeTotals.total)}%)</div>
+                                <div><strong>West:</strong> {formatArea(facadeTotals.west)} m² ({formatPercent(facadeTotals.west, facadeTotals.total)}%)</div>
+                                <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)' }}>
+                                    <strong>Total Façade Area:</strong> {formatArea(facadeTotals.total)} m²
                                 </div>
                             </div>
                         </>
                     )}
-                </div>
-            )}
 
-            {activeTab === 'analysis' && (
-                <div class="section">
-                    <h3>Analysis</h3>
-                    <p class="muted">Visualization controls move here in Pass 3.</p>
-                </div>
-            )}
+                    <div class="section">
+                        <div class="row">
+                            <button onClick={colorBuildings} disabled={isLoading || isColoring || buildingData.length === 0}>
+                                {isColoring ? <><span class="spinner">⟳</span> Colouring…</> : 'Apply Colours to All Buildings'}
+                            </button>
+                            <button class="button-ghost" onClick={reset}>Reset</button>
+                        </div>
+                    </div>
 
-            {activeTab === 'export' && (
-                <div class="section">
-                    <h3>Export</h3>
-                    <p class="muted">CSV export will land here in Pass 3.</p>
-                </div>
+                    <div class="section">
+                        <h3>Export</h3>
+                        <div class="row">
+                            <button onClick={exportCsv} disabled={buildingData.length === 0}>Download CSV</button>
+                            <button class="button-ghost" onClick={copyTable} disabled={buildingData.length === 0}>
+                                Copy Table
+                            </button>
+                        </div>
+                        <p class="muted">
+                            {exportMessage ?? 'One row per building. If the download does not start inside Forma, use Copy Table and paste into Excel.'}
+                        </p>
+                    </div>
+                </>
             )}
         </>
     );
