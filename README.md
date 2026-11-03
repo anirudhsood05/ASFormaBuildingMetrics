@@ -10,8 +10,12 @@ Area figures already reported by Forma's own Area Metrics panel (gross floor are
 
 1. Open the panel in Forma. All buildings load into the list.
 2. Pick a colour mode and click **Apply colours**. Every building in the proposal is coloured.
-3. Click a building in the list to move the camera to it.
+3. Click a building in the list to see all its values and move the camera to it.
 4. Click **Reset** to remove the colours.
+5. **Your own categories** (for example Phase or Tenure): type a name under the colour modes and click **Add category**. Add values with a colour each, select buildings in Forma, and click **Assign selected** next to a value. Each category becomes a colour mode and an export column. A **Use** category is set up to start with.
+6. Under **Export**, click **Download CSV**, or **Copy Table** and paste into Excel. Forma may block downloads from its panel; Copy Table is the fallback.
+
+Categories are saved in the Forma project and shared with everyone on it who uses the extension: category names and colours apply to the whole project, building assignments to each proposal. Changing them needs edit access to the project. A building that is deleted and redrawn loses its assignments. If two people edit at the same moment, the last save wins.
 
 Estimates and assumptions:
 

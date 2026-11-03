@@ -16,7 +16,6 @@
     --bg-page: #ffffff;
     --bg-section: #f9f9f9;
     --bg-subtle: #f1f1f1;
-    --bg-tabbar: #ffffff;
     --bg-summary: #ffffff;
     --bg-selected: #e3f2fd;
     --bg-skeleton: #e8e8e8;
@@ -44,7 +43,6 @@
         --bg-page: #1a1a1a;
         --bg-section: #2d2d2d;
         --bg-subtle: #242424;
-        --bg-tabbar: #111111;
         --bg-summary: #212121;
         --bg-selected: #1e3a5f;
         --bg-skeleton: #333333;
@@ -223,54 +221,6 @@ button {
 }
 
 /* ============================================================
-   Tab bar
-   ============================================================ */
-.tab-bar {
-    background: var(--bg-tabbar);
-    border-bottom: 1px solid var(--border-subtle);
-    display: flex;
-    gap: 0;
-    margin-bottom: 1em;
-    padding: 0 0.2em;
-}
-
-.tab {
-    background: transparent;
-    border: none;
-    border-bottom: 3px solid transparent;
-    padding: 0.6em 1em; 
-    font-size: 0.9em;
-    font-family: inherit;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.15s ease;
-    font-weight: 500;
-    border-radius: 0;
-}
-
-    .tab:hover:not(:disabled):not(.tab--active) {
-        background: var(--bg-subtle);
-        color: var(--text-primary);
-    }
-
-.tab--active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-    font-weight: 700;
-    background: transparent;
-}
-
-/* Override generic button hover for tabs */
-.tab:hover:not(:disabled) {
-    background: var(--bg-subtle);
-}
-
-.tab--active:hover:not(:disabled) {
-    background: transparent;
-    color: var(--accent);
-}
-
-/* ============================================================
    Skeleton loading rows
    ============================================================ */
 .skeleton-row {
@@ -404,6 +354,84 @@ button {
     }
 
 /* ============================================================
+   Building detail - shown under the list for the selected building
+   ============================================================ */
+.building-detail {
+    margin-top: 0.8em;
+    padding: 0.8em 0.9em;
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    background: var(--bg-page);
+}
+
+    .building-detail h3 {
+        margin-top: 0;
+    }
+
+.building-detail__grid,
+.building-detail__facade {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.3em 1em;
+    font-variant-numeric: tabular-nums;
+}
+
+.building-detail__facade {
+    margin-top: 0.6em;
+    padding-top: 0.6em;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.orientation-chip {
+    display: inline-block;
+    padding: 0 0.5em;
+    border-radius: 4px;
+    color: #000;
+    font-weight: 600;
+}
+
+/* ============================================================
+   Category panel - one row per value
+   ============================================================ */
+.category-title {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 1.1em !important;
+    font-weight: 600;
+    margin-bottom: 0.6em;
+}
+
+.category-value {
+    display: grid;
+    grid-template-columns: 2.2em minmax(0, 1fr) 2.5em auto auto;
+    align-items: center;
+    gap: 0.5em;
+    margin-bottom: 0.4em;
+}
+
+.category-value--new {
+    grid-template-columns: 2.2em minmax(0, 1fr) auto;
+    margin-top: 0.8em;
+    padding-top: 0.8em;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.category-value__swatch {
+    width: 2.2em;
+    height: 2.2em;
+    border-radius: 4px;
+    border: 1px solid var(--border-subtle);
+    box-sizing: border-box;
+}
+
+.category-value__count {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
+}
+
+/* ============================================================
    Sort controls
    ============================================================ */
 .sort-controls {
@@ -435,6 +463,31 @@ select {
     select:hover {
         border-color: var(--border-strong);
     }
+
+input[type="text"] {
+    background: var(--bg-page);
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+    border-radius: 4px;
+    padding: 0.4em 0.6em;
+    font-size: 0.9em;
+    font-family: inherit;
+    min-width: 0;
+}
+
+    input[type="text"]:hover {
+        border-color: var(--border-strong);
+    }
+
+input[type="color"] {
+    width: 2.2em;
+    height: 2.2em;
+    padding: 0;
+    border: 1px solid var(--border-default);
+    border-radius: 4px;
+    background: none;
+    cursor: pointer;
+}
 
 .sort-dir-btn {
     background: transparent;
