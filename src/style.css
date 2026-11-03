@@ -432,6 +432,39 @@ button {
 }
 
 /* ============================================================
+   Import - paste box and preview
+   ============================================================ */
+.import-paste {
+    margin-top: 0.8em;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5em;
+}
+
+.import-preview {
+    margin-top: 0.8em;
+    padding: 0.8em 0.9em;
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    background: var(--bg-page);
+}
+
+    .import-preview h3 {
+        margin-top: 0;
+    }
+
+    .import-preview ul {
+        margin: 0 0 0.8em;
+        padding-left: 1.2em;
+    }
+
+.import-preview--error {
+    border-left-color: var(--error-bg);
+}
+
+/* ============================================================
    Sort controls
    ============================================================ */
 .sort-controls {
@@ -478,6 +511,20 @@ input[type="text"] {
     input[type="text"]:hover {
         border-color: var(--border-strong);
     }
+
+textarea {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 6em;
+    background: var(--bg-page);
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+    border-radius: 4px;
+    padding: 0.4em 0.6em;
+    font-size: 0.85em;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    resize: vertical;
+}
 
 input[type="color"] {
     width: 2.2em;

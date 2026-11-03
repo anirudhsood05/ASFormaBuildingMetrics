@@ -1,11 +1,14 @@
 import { render } from 'preact';
 import './style.css';
 import { Forma } from "forma-embedded-view-sdk/auto";
-import { useState, useEffect, useMemo } from "preact/hooks";
+import { useState, useEffect, useMemo, useRef } from "preact/hooks";
 import {
     Assignments, Category, CategoryValue, UNASSIGNED_COLOR, defaultCategories, getProposalId,
     loadAssignments, loadCategories, newId, paletteColor, saveAssignments, saveCategories,
 } from "./categories";
+import {
+    ImportPlan, buildExportRows, categoryValueName, decodeText, parseTable, planImport, toCsv, toTsv,
+} from "./table";
 
 // =============================================================
 // TYPES
@@ -353,35 +356,6 @@ function BuildingDetail({ building, categories, assignments }: {
 // =============================================================
 // EXPORT HELPERS
 // =============================================================
-const EXPORT_HEADER = [
-    'Building', 'Height (m)', 'Footprint (m²)', 'Floors (est.)', 'Volume (est., m³)',
-    'North façade (m²)', 'South façade (m²)', 'East façade (m²)', 'West façade (m²)',
-    'Total façade (m²)', 'Dominant orientation',
-];
-
-/** Name of the building's value in a category, or '' when unassigned. */
-const categoryValueName = (cat: Category, assignments: Assignments, path: string): string => {
-    const valueId = assignments[cat.id]?.[path];
-    return cat.values.find((v) => v.id === valueId)?.name ?? '';
-};
-
-const buildExportRows = (buildings: BuildingData[], categories: Category[], assignments: Assignments): string[][] => [
-    [...EXPORT_HEADER, ...categories.map((cat) => cat.name)],
-    ...[...buildings].sort((a, b) => a.number - b.number).map((b) => [
-        `Building ${b.number}`, b.height.toFixed(1), b.footprintArea.toFixed(1),
-        String(b.floorCount), b.volume.toFixed(0),
-        formatArea(b.north), formatArea(b.south), formatArea(b.east), formatArea(b.west),
-        formatArea(b.totalFacadeArea), b.dominantOrientation,
-        ...categories.map((cat) => categoryValueName(cat, assignments, b.path)),
-    ]),
-];
-
-const toCsv = (rows: string[][]): string =>
-    rows.map((r) => r.map((v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v)).join(',')).join('\r\n');
-
-// Tab-separated text pastes straight into Excel columns.
-const toTsv = (rows: string[][]): string => rows.map((r) => r.join('\t')).join('\n');
-
 const downloadCsv = (csv: string) => {
     // The BOM makes Excel read m² and ç correctly.
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
@@ -535,6 +509,50 @@ function CategoryPanel({
 }
 
 // =============================================================
+// IMPORT PREVIEW - what an import will change, before it is applied
+// =============================================================
+function ImportPreview({ plan, onApply, onCancel }: {
+    plan: ImportPlan; onApply: () => void; onCancel: () => void;
+}) {
+    if (!plan.ok) {
+        return (
+            <div class="import-preview import-preview--error">
+                <p>{plan.error}</p>
+                <button class="button-ghost" onClick={onCancel}>Close</button>
+            </div>
+        );
+    }
+    const s = plan.summary;
+    const shown = s.unmatched.slice(0, 5).join(', ') + (s.unmatched.length > 5 ? ` and ${s.unmatched.length - 5} more` : '');
+    return (
+        <div class="import-preview">
+            <h3>Import preview</h3>
+            <ul>
+                <li>{s.matchedRows} row{s.matchedRows === 1 ? '' : 's'} matched to buildings in this proposal</li>
+                <li><strong>{s.changedBuildings} building{s.changedBuildings === 1 ? '' : 's'} will change</strong></li>
+                {s.updatedCategories.length > 0 && <li>Categories updated: {s.updatedCategories.join(', ')}</li>}
+                {s.newCategories.map((c) => (
+                    <li key={c.name}>New category: {c.name} ({c.values} value{c.values === 1 ? '' : 's'})</li>
+                ))}
+                {s.newValues.length > 0 && <li>New values: {s.newValues.join(', ')}</li>}
+                {s.unmatched.length > 0 && (
+                    <li>{s.unmatched.length} row{s.unmatched.length === 1 ? '' : 's'} not matched and skipped: {shown}</li>
+                )}
+                {s.duplicateRows > 0 && (
+                    <li>{s.duplicateRows} repeated row{s.duplicateRows === 1 ? '' : 's'} (the last one for each building is used)</li>
+                )}
+            </ul>
+            <div class="row">
+                <button onClick={onApply} disabled={s.changedBuildings === 0 && s.newCategories.length === 0 && s.newValues.length === 0}>
+                    Apply
+                </button>
+                <button class="button-ghost" onClick={onCancel}>Cancel</button>
+            </div>
+        </div>
+    );
+}
+
+// =============================================================
 // MAIN APP
 // =============================================================
 function App() {
@@ -556,6 +574,12 @@ function App() {
 
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [exportMessage, setExportMessage] = useState<string | null>(null);
+    /** Parsed rows of a file or paste waiting for the user to apply or cancel. */
+    const [importRows, setImportRows] = useState<string[][] | null>(null);
+    const [showPaste, setShowPaste] = useState<boolean>(false);
+    const [pasteText, setPasteText] = useState<string>('');
+    const [importMessage, setImportMessage] = useState<string | null>(null);
+    const fileInput = useRef<HTMLInputElement>(null);
 
     // NEW in Pass 2: sort state
     const [sortKey, setSortKey] = useState<SortKey>('index');
@@ -902,6 +926,42 @@ function App() {
         }
     };
 
+    // --------- IMPORT ---------
+    // Planned against current state, so the preview stays right if categories change meanwhile.
+    const importPlan = useMemo(
+        () => (importRows ? planImport(importRows, buildingData, categories, assignments) : null),
+        [importRows, buildingData, categories, assignments],
+    );
+
+    const startImport = (text: string) => {
+        setImportMessage(null);
+        setImportRows(parseTable(text));
+    };
+
+    const onFileChosen = async (e: Event) => {
+        const input = e.target as HTMLInputElement;
+        const file = input.files?.[0];
+        input.value = ''; // so choosing the same file again still triggers a change
+        if (!file) return;
+        try {
+            startImport(decodeText(await file.arrayBuffer()));
+        } catch (error) {
+            console.error(error);
+            setErrorMessage('Could not read the file. Try Paste Table instead.');
+        }
+    };
+
+    const applyImport = () => {
+        if (!importPlan?.ok) return;
+        updateCategories(importPlan.categories);
+        updateAssignments(importPlan.assignments);
+        const n = importPlan.summary.changedBuildings;
+        setImportMessage(`Imported: ${n} building${n === 1 ? '' : 's'} updated.`);
+        setImportRows(null);
+        setShowPaste(false);
+        setPasteText('');
+    };
+
     // =========================================================
     // RENDER
     // =========================================================
@@ -1079,6 +1139,39 @@ function App() {
                             {exportMessage ?? 'One row per building. If the download does not start inside Forma, use Copy Table and paste into Excel.'}
                         </p>
                     </div>
+
+                    {canEdit && categoriesReady && (
+                        <div class="section">
+                            <h3>Import Categories</h3>
+                            <div class="row row--wrap">
+                                <button class="button-ghost" onClick={() => fileInput.current?.click()}>Choose CSV…</button>
+                                <button class="button-ghost" onClick={() => setShowPaste(!showPaste)}>Paste Table</button>
+                                <input
+                                    ref={fileInput}
+                                    type="file"
+                                    accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
+                                    style={{ display: 'none' }}
+                                    onChange={onFileChosen}
+                                />
+                            </div>
+                            {showPaste && (
+                                <div class="import-paste">
+                                    <textarea
+                                        value={pasteText}
+                                        placeholder="Paste rows copied from Excel, including the header row"
+                                        onInput={(e) => setPasteText((e.target as HTMLTextAreaElement).value)}
+                                    />
+                                    <button onClick={() => startImport(pasteText)} disabled={!pasteText.trim()}>Preview</button>
+                                </div>
+                            )}
+                            {importPlan && (
+                                <ImportPreview plan={importPlan} onApply={applyImport} onCancel={() => setImportRows(null)} />
+                            )}
+                            <p class="muted">
+                                {importMessage ?? 'Edit the category columns of an exported CSV, then import it. Rows are matched by the Forma ID column. A blank cell clears the value, a new column creates a category, and buildings missing from the file are left unchanged.'}
+                            </p>
+                        </div>
+                    )}
                 </>
             )}
         </>
