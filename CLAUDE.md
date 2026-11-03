@@ -24,7 +24,7 @@ There is no test runner or linter configured. `npm run build` fails on TypeScrip
 
 ## Architecture
 
-Almost everything lives in `src/index.tsx` (~1,090 lines, Preact). `src/categories.ts` holds the user-defined category model and its storage. There is no routing, no state management library and no component folder.
+Almost everything lives in `src/index.tsx` (~1,180 lines, Preact). `src/categories.ts` holds the user-defined category model and its storage. `src/table.ts` holds the export table and CSV import (pure functions, no Forma calls). There is no routing, no state management library and no component folder.
 
 **Forma SDK integration** (`forma-embedded-view-sdk/auto`):
 - `Forma.geometry.getPathsByCategory({ category: "building" })` — enumerate building paths in the scene
@@ -52,7 +52,8 @@ Almost everything lives in `src/index.tsx` (~1,090 lines, Preact). `src/categori
 **UI structure**:
 - `SummaryStrip` — always-visible aggregate stats (building count, avg height, max height, total façade area)
 - Single screen, no tabs: `BuildingList` with `SortControls` (each building has a stable `number` in load order, shown as "#3" / "Building 3"), `BuildingDetail` for the clicked building, colour mode buttons (built-in modes plus one per category, ColorMode `category:<id>`), `CategoryPanel` for the active category, context-sensitive legend, colour action buttons, then Export
-- Export: `buildExportRows` → `toCsv` (download via Blob, with a UTF-8 BOM for Excel) or `toTsv` (clipboard, with an `execCommand` fallback because the Clipboard API is often blocked in iframes)
+- Export: `buildExportRows` → `toCsv` (download via Blob, with a UTF-8 BOM for Excel) or `toTsv` (clipboard, with an `execCommand` fallback because the Clipboard API is often blocked in iframes). The last column, `Forma ID`, is the building path
+- Import (`table.ts`): `decodeText` (UTF-8, falling back to Windows-1252 for Excel's plain CSV) → `parseTable` (comma, semicolon or tab, detected from the header) → `planImport`, which matches rows by `Forma ID`, ignores the measured columns, matches categories and values by name case-insensitively, creates unknown ones, and treats a blank cell as unassigned. `ImportPreview` shows the plan; nothing changes until Apply. The plan is recomputed against current state, and import is hidden for view-only users
 - `style.css` — design-token–based CSS (CSS custom properties for light/dark mode, no CSS framework)
 
 **Important constraint**: The app cannot be meaningfully tested in a standalone browser — `Forma.*` API calls will fail without the Forma host environment. Development and testing requires loading the dev server URL inside Forma's embedded view panel.

@@ -14,6 +14,7 @@ Area figures already reported by Forma's own Area Metrics panel (gross floor are
 4. Click **Reset** to remove the colours.
 5. **Your own categories** (for example Phase or Tenure): type a name under the colour modes and click **Add category**. Add values with a colour each, select buildings in Forma, and click **Assign selected** next to a value. Each category becomes a colour mode and an export column. A **Use** category is set up to start with.
 6. Under **Export**, click **Download CSV**, or **Copy Table** and paste into Excel. Forma may block downloads from its panel; Copy Table is the fallback.
+7. **Import categories back:** edit the category columns of an exported CSV in Excel (change values, blank a cell to clear it, or add a column to create a new category), then use **Choose CSV…** or **Paste Table** under **Import Categories**. A preview shows what will change before you click **Apply**. Rows are matched to buildings by the **Forma ID** column, so keep it; buildings missing from the file are left unchanged. Measured columns such as height are ignored on import.
 
 Categories are saved in the Forma project and shared with everyone on it who uses the extension: category names and colours apply to the whole project, building assignments to each proposal. Changing them needs edit access to the project. A building that is deleted and redrawn loses its assignments. If two people edit at the same moment, the last save wins.
 
