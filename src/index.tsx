@@ -2,6 +2,10 @@ import { render } from 'preact';
 import './style.css';
 import { Forma } from "forma-embedded-view-sdk/auto";
 import { useState, useEffect, useMemo } from "preact/hooks";
+import {
+    Assignments, Category, CategoryValue, UNASSIGNED_COLOR, defaultCategories, getProposalId,
+    loadAssignments, loadCategories, newId, paletteColor, saveAssignments, saveCategories,
+} from "./categories";
 
 // =============================================================
 // TYPES
@@ -21,7 +25,6 @@ interface BuildingData {
     footprintArea: number;
     volume: number;
     floorCount: number;
-    buildingUse: string;
     /** Bounding-box centre and largest dimension, used to frame the camera. */
     centre: { x: number; y: number; z: number };
     size: number;
@@ -35,7 +38,10 @@ interface BuildingData {
 
 type ColorMode =
     | 'height' | 'area' | 'volume' | 'floors'
-    | 'use' | 'facadeDominant' | 'facadeMixed';
+    | 'facadeDominant' | 'facadeMixed'
+    | `category:${string}`;
+
+const categoryMode = (id: string): ColorMode => `category:${id}`;
 
 type SortKey = 'index' | 'height' | 'area' | 'floors';
 type SortDir = 'asc' | 'desc';
@@ -79,18 +85,6 @@ const getColorByFloorCount = (floors: number): RgbaColor => {
     if (floors < 7) return { r: 34, g: 139, b: 34, a: 1 };
     if (floors < 15) return { r: 255, g: 140, b: 0, a: 1 };
     return { r: 178, g: 34, b: 34, a: 1 };
-};
-
-const getColorByUse = (use: string): RgbaColor => {
-    const u = use.toLowerCase();
-    if (u.includes('residential') || u.includes('apartments')) return { r: 144, g: 238, b: 144, a: 1 };
-    if (u.includes('commercial') || u.includes('retail') || u.includes('shop')) return { r: 100, g: 149, b: 237, a: 1 };
-    if (u.includes('office')) return { r: 186, g: 85, b: 211, a: 1 };
-    if (u.includes('industrial') || u.includes('warehouse')) return { r: 169, g: 169, b: 169, a: 1 };
-    if (u.includes('hospital') || u.includes('clinic')) return { r: 220, g: 20, b: 60, a: 1 };
-    if (u.includes('school') || u.includes('university')) return { r: 255, g: 215, b: 0, a: 1 };
-    if (u.includes('mixed')) return { r: 255, g: 140, b: 0, a: 1 };
-    return { r: 211, g: 211, b: 211, a: 1 };
 };
 
 /** sRGB hex string, as expected by Forma.render.elementColors. */
@@ -316,7 +310,9 @@ const formatPercent = (area: number, total: number) =>
 // =============================================================
 // BUILDING DETAIL - every value for the selected building
 // =============================================================
-function BuildingDetail({ building }: { building: BuildingData }) {
+function BuildingDetail({ building, categories, assignments }: {
+    building: BuildingData; categories: Category[]; assignments: Assignments;
+}) {
     const b = building;
     const c = ORIENTATION_COLORS[b.dominantOrientation];
     const facade: [string, number][] = [
@@ -330,7 +326,11 @@ function BuildingDetail({ building }: { building: BuildingData }) {
                 <div><span class="muted">Footprint</span> {b.footprintArea.toFixed(0)} m²</div>
                 <div><span class="muted">Floors (est.)</span> {b.floorCount}</div>
                 <div><span class="muted">Volume (est.)</span> {b.volume.toFixed(0)} m³</div>
-                <div><span class="muted">Use</span> {b.buildingUse}</div>
+                {categories.map((cat) => (
+                    <div key={cat.id}>
+                        <span class="muted">{cat.name}</span> {categoryValueName(cat, assignments, b.path) || '—'}
+                    </div>
+                ))}
                 <div>
                     <span class="muted">Dominant façade</span>{' '}
                     <span class="orientation-chip" style={{ backgroundColor: `rgb(${c.r}, ${c.g}, ${c.b})` }}>
@@ -354,18 +354,25 @@ function BuildingDetail({ building }: { building: BuildingData }) {
 // EXPORT HELPERS
 // =============================================================
 const EXPORT_HEADER = [
-    'Building', 'Height (m)', 'Footprint (m²)', 'Floors (est.)', 'Volume (est., m³)', 'Use',
+    'Building', 'Height (m)', 'Footprint (m²)', 'Floors (est.)', 'Volume (est., m³)',
     'North façade (m²)', 'South façade (m²)', 'East façade (m²)', 'West façade (m²)',
     'Total façade (m²)', 'Dominant orientation',
 ];
 
-const buildExportRows = (buildings: BuildingData[]): string[][] => [
-    EXPORT_HEADER,
+/** Name of the building's value in a category, or '' when unassigned. */
+const categoryValueName = (cat: Category, assignments: Assignments, path: string): string => {
+    const valueId = assignments[cat.id]?.[path];
+    return cat.values.find((v) => v.id === valueId)?.name ?? '';
+};
+
+const buildExportRows = (buildings: BuildingData[], categories: Category[], assignments: Assignments): string[][] => [
+    [...EXPORT_HEADER, ...categories.map((cat) => cat.name)],
     ...[...buildings].sort((a, b) => a.number - b.number).map((b) => [
         `Building ${b.number}`, b.height.toFixed(1), b.footprintArea.toFixed(1),
-        String(b.floorCount), b.volume.toFixed(0), b.buildingUse,
+        String(b.floorCount), b.volume.toFixed(0),
         formatArea(b.north), formatArea(b.south), formatArea(b.east), formatArea(b.west),
         formatArea(b.totalFacadeArea), b.dominantOrientation,
+        ...categories.map((cat) => categoryValueName(cat, assignments, b.path)),
     ]),
 ];
 
@@ -406,6 +413,128 @@ const copyText = async (text: string) => {
 };
 
 // =============================================================
+// CATEGORY PANEL - legend, editing and assignment for one category
+// =============================================================
+function CategoryPanel({
+    category, counts, unassignedCount, editable, message,
+    onRename, onDelete, onAddValue, onUpdateValue, onDeleteValue, onAssign, onClear,
+}: {
+    category: Category;
+    counts: Record<string, number>;
+    unassignedCount: number;
+    editable: boolean;
+    message: string | null;
+    onRename: (name: string) => void;
+    onDelete: () => void;
+    onAddValue: (name: string, color: string) => void;
+    onUpdateValue: (valueId: string, patch: Partial<Omit<CategoryValue, 'id'>>) => void;
+    onDeleteValue: (valueId: string) => void;
+    onAssign: (valueId: string) => void;
+    onClear: () => void;
+}) {
+    const [newName, setNewName] = useState('');
+    const [newColor, setNewColor] = useState(paletteColor(category.values.length));
+    const [confirmDelete, setConfirmDelete] = useState(false);
+    const inputValue = (e: Event) => (e.target as HTMLInputElement).value;
+
+    const addValue = () => {
+        const name = newName.trim();
+        if (!name) return;
+        onAddValue(name, newColor);
+        setNewName('');
+        setNewColor(paletteColor(category.values.length + 1));
+    };
+
+    return (
+        <div class="section">
+            {editable
+                ? <input
+                    class="category-title"
+                    type="text"
+                    value={category.name}
+                    aria-label="Category name"
+                    onChange={(e) => { const name = inputValue(e).trim(); if (name) onRename(name); }}
+                />
+                : <h3>{category.name}</h3>}
+
+            {category.values.map((v) => (
+                <div key={v.id} class="category-value">
+                    {editable
+                        ? <input
+                            type="color"
+                            value={v.color}
+                            title="Change colour"
+                            aria-label={`Colour for ${v.name}`}
+                            onChange={(e) => onUpdateValue(v.id, { color: inputValue(e) })}
+                        />
+                        : <span class="category-value__swatch" style={{ backgroundColor: v.color }} />}
+                    {editable
+                        ? <input
+                            type="text"
+                            value={v.name}
+                            aria-label="Value name"
+                            onChange={(e) => { const name = inputValue(e).trim(); if (name) onUpdateValue(v.id, { name }); }}
+                        />
+                        : <span>{v.name}</span>}
+                    <span class="category-value__count" title="Buildings with this value">{counts[v.id] ?? 0}</span>
+                    {editable && (
+                        <>
+                            <button class="button-ghost" onClick={() => onAssign(v.id)} title="Assign the buildings selected in Forma">
+                                Assign selected
+                            </button>
+                            <button class="button-ghost" onClick={() => onDeleteValue(v.id)} title={`Delete ${v.name}`} aria-label={`Delete ${v.name}`}>
+                                ×
+                            </button>
+                        </>
+                    )}
+                </div>
+            ))}
+            <div class="category-value">
+                <span class="category-value__swatch" style={{ backgroundColor: UNASSIGNED_COLOR }} />
+                <span class="muted">Unassigned</span>
+                <span class="category-value__count">{unassignedCount}</span>
+            </div>
+
+            {editable && (
+                <>
+                    <div class="category-value category-value--new">
+                        <input
+                            type="color"
+                            value={newColor}
+                            aria-label="Colour for new value"
+                            onChange={(e) => setNewColor(inputValue(e))}
+                        />
+                        <input
+                            type="text"
+                            value={newName}
+                            placeholder="New value, e.g. Phase 1"
+                            onInput={(e) => setNewName(inputValue(e))}
+                            onKeyDown={(e) => { if (e.key === 'Enter') addValue(); }}
+                        />
+                        <button onClick={addValue} disabled={!newName.trim()}>Add value</button>
+                    </div>
+                    <div class="row row--wrap" style={{ marginTop: '0.8em' }}>
+                        <button class="button-ghost" onClick={onClear}>Clear selected</button>
+                        <button
+                            class="button-ghost"
+                            onClick={() => (confirmDelete ? onDelete() : setConfirmDelete(true))}
+                            onBlur={() => setConfirmDelete(false)}
+                        >
+                            {confirmDelete ? `Click again to delete "${category.name}"` : 'Delete category'}
+                        </button>
+                    </div>
+                </>
+            )}
+            <p class="muted">
+                {message ?? (editable
+                    ? 'Select buildings in Forma, then click Assign selected next to a value.'
+                    : 'View only: edit access to this Forma project is needed to change categories.')}
+            </p>
+        </div>
+    );
+}
+
+// =============================================================
 // MAIN APP
 // =============================================================
 function App() {
@@ -414,8 +543,16 @@ function App() {
     const [isColoring, setIsColoring] = useState<boolean>(false);
     const [colorMode, setColorMode] = useState<ColorMode>('height');
     const [selectedBuilding, setSelectedBuilding] = useState<string | null>(null);
-    const [selectedUse, setSelectedUse] = useState<string>('residential');
-    const [buildingUseTags, setBuildingUseTags] = useState<Map<string, string>>(new Map());
+    const [categories, setCategories] = useState<Category[]>(defaultCategories);
+    const [assignments, setAssignments] = useState<Assignments>({});
+    const [proposalId, setProposalId] = useState<string | null>(null);
+    const [canEdit, setCanEdit] = useState<boolean>(false);
+    const [categoriesReady, setCategoriesReady] = useState<boolean>(false);
+    const [storageWarning, setStorageWarning] = useState<string | null>(null);
+    const [categoryMessage, setCategoryMessage] = useState<string | null>(null);
+    const [newCategoryName, setNewCategoryName] = useState<string>('');
+    /** Mode last applied to the scene, so category edits can refresh the colours. */
+    const [appliedMode, setAppliedMode] = useState<ColorMode | null>(null);
 
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [exportMessage, setExportMessage] = useState<string | null>(null);
@@ -458,8 +595,6 @@ function App() {
                     const volume = height * footprintArea;
                     const floorCount = Math.round(height / FLOOR_TO_FLOOR_M);
 
-                    const buildingUse = buildingUseTags.get(path) || 'unknown';
-
                     let north = 0, south = 0, east = 0, west = 0;
                     for (let i = 0; i < position.length; i += 9) {
                         const v1: [number, number, number] = [position[i], position[i + 1], position[i + 2]];
@@ -486,7 +621,7 @@ function App() {
                     if (west > maxArea) { maxArea = west; dominantOrientation = 'West'; }
 
                     return {
-                        path, number: index + 1, height, footprintArea, volume, floorCount, buildingUse,
+                        path, number: index + 1, height, footprintArea, volume, floorCount,
                         centre, size,
                         north, south, east, west, totalFacadeArea, dominantOrientation
                     };
@@ -506,30 +641,116 @@ function App() {
             }
         };
         fetchData();
-    }, [buildingUseTags]);
+    }, []);
 
-    // --------- ACTIONS (unchanged) ---------
-    const tagSelectedBuildings = async () => {
+    // --------- CATEGORIES: load from the Forma project ---------
+    useEffect(() => {
+        const loadStoredCategories = async () => {
+            try {
+                const [editable, id] = await Promise.all([Forma.getCanEdit(), getProposalId()]);
+                setCanEdit(editable);
+                setProposalId(id);
+                const [storedCategories, storedAssignments] = await Promise.all([loadCategories(), loadAssignments(id)]);
+                if (storedCategories) setCategories(storedCategories);
+                if (storedAssignments) setAssignments(storedAssignments);
+            } catch (error) {
+                console.error(error);
+                setCanEdit(true);
+                setStorageWarning('Categories could not be loaded from the Forma project, so changes will only last until the panel is closed.');
+            } finally {
+                setCategoriesReady(true);
+            }
+        };
+        loadStoredCategories();
+    }, []);
+
+    // --------- CATEGORY ACTIONS (saved to the Forma project on every change) ---------
+    const storageFailed = (error: unknown) => {
+        console.error(error);
+        setStorageWarning('Could not save to the Forma project, so recent changes will be lost when the panel closes.');
+    };
+
+    const updateCategories = (next: Category[]) => {
+        setCategories(next);
+        saveCategories(next).catch(storageFailed);
+    };
+
+    const updateAssignments = (next: Assignments) => {
+        setAssignments(next);
+        if (proposalId) saveAssignments(proposalId, next).catch(storageFailed);
+    };
+
+    const editCategory = (id: string, edit: (cat: Category) => Category) =>
+        updateCategories(categories.map((cat) => (cat.id === id ? edit(cat) : cat)));
+
+    const createCategory = () => {
+        const name = newCategoryName.trim();
+        if (!name) return;
+        const category: Category = { id: newId(), name, values: [] };
+        updateCategories([...categories, category]);
+        setNewCategoryName('');
+        setColorMode(categoryMode(category.id));
+        setCategoryMessage(null);
+    };
+
+    const deleteCategory = (id: string) => {
+        updateCategories(categories.filter((cat) => cat.id !== id));
+        const { [id]: _removed, ...rest } = assignments;
+        updateAssignments(rest);
+        setColorMode('height');
+    };
+
+    const deleteValue = (categoryId: string, valueId: string) => {
+        editCategory(categoryId, (cat) => ({ ...cat, values: cat.values.filter((v) => v.id !== valueId) }));
+        const kept = Object.entries(assignments[categoryId] ?? {}).filter(([, v]) => v !== valueId);
+        updateAssignments({ ...assignments, [categoryId]: Object.fromEntries(kept) });
+    };
+
+    /** Building paths for the current Forma selection (a selected child element counts as its building). */
+    const selectedBuildingPaths = async (): Promise<string[]> => {
+        const selection = await Forma.selection.getSelection();
+        const paths = new Set<string>();
+        for (const sel of selection) {
+            const building = buildingData.find((b) => sel === b.path || sel.startsWith(b.path + '/'));
+            if (building) paths.add(building.path);
+        }
+        return [...paths];
+    };
+
+    const assignSelected = async (categoryId: string, valueId: string | null) => {
         try {
-            const selectedPaths = await Forma.selection.getSelection();
-            const newTags = new Map(buildingUseTags);
-            selectedPaths.forEach(path => newTags.set(path, selectedUse));
-            setBuildingUseTags(newTags);
+            const paths = await selectedBuildingPaths();
+            if (paths.length === 0) {
+                setCategoryMessage('No buildings selected. Select buildings in Forma first.');
+                return;
+            }
+            const forCategory = { ...(assignments[categoryId] ?? {}) };
+            for (const path of paths) {
+                if (valueId) forCategory[path] = valueId;
+                else delete forCategory[path];
+            }
+            updateAssignments({ ...assignments, [categoryId]: forCategory });
+            setCategoryMessage(`${valueId ? 'Assigned' : 'Cleared'} ${paths.length} building${paths.length === 1 ? '' : 's'}.`);
         } catch (error) {
             console.error(error);
-            setErrorMessage('Failed to tag selected buildings.');
+            setErrorMessage('Failed to read the Forma selection.');
         }
     };
 
-    const getBuildingColor = (building: BuildingData): RgbaColor => {
+    const activeCategory = categories.find((cat) => categoryMode(cat.id) === colorMode);
+
+    const getBuildingColor = (building: BuildingData): string => {
+        if (activeCategory) {
+            const valueId = assignments[activeCategory.id]?.[building.path];
+            return activeCategory.values.find((v) => v.id === valueId)?.color ?? UNASSIGNED_COLOR;
+        }
         switch (colorMode) {
-            case 'height': return getColorByHeight(building.height);
-            case 'area': return getColorByArea(building.footprintArea);
-            case 'volume': return getColorByVolume(building.volume);
-            case 'floors': return getColorByFloorCount(building.floorCount);
-            case 'use': return getColorByUse(buildingUseTags.get(building.path) || 'unknown');
-            case 'facadeDominant': return ORIENTATION_COLORS[building.dominantOrientation];
-            default: return { r: 200, g: 200, b: 200, a: 1 };
+            case 'height': return toHex(getColorByHeight(building.height));
+            case 'area': return toHex(getColorByArea(building.footprintArea));
+            case 'volume': return toHex(getColorByVolume(building.volume));
+            case 'floors': return toHex(getColorByFloorCount(building.floorCount));
+            case 'facadeDominant': return toHex(ORIENTATION_COLORS[building.dominantOrientation]);
+            default: return UNASSIGNED_COLOR;
         }
     };
 
@@ -565,10 +786,11 @@ function App() {
                 await Forma.render.cleanup();
                 const pathsToColor = new Map<string, string>();
                 for (const building of buildingData) {
-                    pathsToColor.set(building.path, toHex(getBuildingColor(building)));
+                    pathsToColor.set(building.path, getBuildingColor(building));
                 }
                 await Forma.render.elementColors.set({ pathsToColor });
             }
+            setAppliedMode(colorMode);
         } catch (error) {
             console.error(error);
             setErrorMessage('Failed to apply colours to buildings.');
@@ -579,6 +801,7 @@ function App() {
 
     const reset = async () => {
         setSelectedBuilding(null);
+        setAppliedMode(null);
         try {
             await Promise.all([Forma.render.elementColors.clearAll(), Forma.render.cleanup()]);
         } catch (error) {
@@ -586,6 +809,11 @@ function App() {
             setErrorMessage('Failed to reset colours.');
         }
     };
+
+    // Keep the scene in step when the category being shown is edited or reassigned.
+    useEffect(() => {
+        if (activeCategory && appliedMode === colorMode && !isColoring) colorBuildings();
+    }, [categories, assignments]);
 
     // The SDK cannot set the Forma selection, so a row click frames the building instead.
     const focusBuilding = async (building: BuildingData) => {
@@ -639,10 +867,24 @@ function App() {
 
     const selected = buildingData.find((b) => b.path === selectedBuilding);
 
+    // Buildings per value in the category being shown; assignments to deleted buildings are ignored.
+    const categoryCounts = useMemo(() => {
+        const counts: Record<string, number> = {};
+        let unassigned = 0;
+        const forCategory = activeCategory ? assignments[activeCategory.id] ?? {} : {};
+        const valueIds = new Set(activeCategory?.values.map((v) => v.id));
+        for (const b of buildingData) {
+            const valueId = forCategory[b.path];
+            if (valueId && valueIds.has(valueId)) counts[valueId] = (counts[valueId] ?? 0) + 1;
+            else unassigned++;
+        }
+        return { counts, unassigned };
+    }, [activeCategory, assignments, buildingData]);
+
     // --------- EXPORT ---------
     const exportCsv = () => {
         try {
-            downloadCsv(toCsv(buildExportRows(buildingData)));
+            downloadCsv(toCsv(buildExportRows(buildingData, categories, assignments)));
             setExportMessage(`CSV with ${buildingData.length} buildings created. If no download appeared, use Copy Table.`);
         } catch (error) {
             console.error(error);
@@ -652,7 +894,7 @@ function App() {
 
     const copyTable = async () => {
         try {
-            await copyText(toTsv(buildExportRows(buildingData)));
+            await copyText(toTsv(buildExportRows(buildingData, categories, assignments)));
             setExportMessage(`Copied ${buildingData.length} buildings. Paste into Excel.`);
         } catch (error) {
             console.error(error);
@@ -689,7 +931,7 @@ function App() {
                         onSelect={focusBuilding}
                     />
                 }
-                {selected && <BuildingDetail building={selected} />}
+                {selected && <BuildingDetail building={selected} categories={categories} assignments={assignments} />}
                 <p class="muted">
                     Click a building to see its details and move the camera to it. Floors and volume are
                     estimates ({FLOOR_TO_FLOOR_M} m floor-to-floor, extruded footprint).
@@ -707,19 +949,34 @@ function App() {
                                 ['area', 'Footprint'],
                                 ['volume', 'Volume (est.)'],
                                 ['floors', 'Floors (est.)'],
-                                ['use', 'Use'],
                                 ['facadeDominant', 'Façade (Dominant)'],
                                 ['facadeMixed', 'Façade (Mixed)'],
+                                ...categories.map((cat): [ColorMode, string] => [categoryMode(cat.id), cat.name]),
                             ] as [ColorMode, string][]).map(([mode, label]) => (
                                 <button
                                     key={mode}
                                     class={`button-ghost ${colorMode === mode ? 'is-active' : ''}`}
-                                    onClick={() => setColorMode(mode)}
+                                    onClick={() => { setColorMode(mode); setCategoryMessage(null); }}
                                 >
                                     {label}
                                 </button>
                             ))}
                         </div>
+                        {canEdit && categoriesReady && (
+                            <div class="row" style={{ marginTop: '0.8em' }}>
+                                <input
+                                    type="text"
+                                    value={newCategoryName}
+                                    placeholder="New category, e.g. Phase"
+                                    onInput={(e) => setNewCategoryName((e.target as HTMLInputElement).value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') createCategory(); }}
+                                />
+                                <button class="button-ghost" onClick={createCategory} disabled={!newCategoryName.trim()}>
+                                    Add category
+                                </button>
+                            </div>
+                        )}
+                        {storageWarning && <p class="muted">⚠ {storageWarning}</p>}
                     </div>
 
                     {colorMode === 'height' && (
@@ -758,41 +1015,26 @@ function App() {
                             <LegendSwatch color="rgb(178, 34, 34)" label="Tower (15+ floors)" />
                         </div>
                     )}
-                    {colorMode === 'use' && (
-                        <>
-                            <div class="section">
-                                <h3>Building Use Legend</h3>
-                                <LegendSwatch color="rgb(144, 238, 144)" label="Residential" />
-                                <LegendSwatch color="rgb(100, 149, 237)" label="Commercial/Retail" />
-                                <LegendSwatch color="rgb(186, 85, 211)" label="Office" />
-                                <LegendSwatch color="rgb(169, 169, 169)" label="Industrial" />
-                                <LegendSwatch color="rgb(220, 20, 60)" label="Healthcare" />
-                                <LegendSwatch color="rgb(255, 215, 0)" label="Education" />
-                                <LegendSwatch color="rgb(255, 140, 0)" label="Mixed Use" />
-                                <LegendSwatch color="rgb(211, 211, 211)" label="Unknown/Other" />
-                            </div>
-                            <div class="section">
-                                <h3>Tag Selected Buildings</h3>
-                                <div class="row">
-                                    <select
-                                        value={selectedUse}
-                                        onChange={(e) => setSelectedUse((e.target as HTMLSelectElement).value)}
-                                    >
-                                        <option value="residential">Residential</option>
-                                        <option value="commercial">Commercial/Retail</option>
-                                        <option value="office">Office</option>
-                                        <option value="industrial">Industrial</option>
-                                        <option value="hospital">Healthcare</option>
-                                        <option value="school">Education</option>
-                                        <option value="mixed">Mixed Use</option>
-                                    </select>
-                                    <button onClick={tagSelectedBuildings}>Tag Selected</button>
-                                </div>
-                                <p class="muted">
-                                    Select buildings in Forma, choose use type, then click Tag Selected.
-                                </p>
-                            </div>
-                        </>
+                    {activeCategory && (
+                        <CategoryPanel
+                            key={activeCategory.id}
+                            category={activeCategory}
+                            counts={categoryCounts.counts}
+                            unassignedCount={categoryCounts.unassigned}
+                            editable={canEdit && categoriesReady}
+                            message={categoryMessage}
+                            onRename={(name) => editCategory(activeCategory.id, (cat) => ({ ...cat, name }))}
+                            onDelete={() => deleteCategory(activeCategory.id)}
+                            onAddValue={(name, color) => editCategory(activeCategory.id, (cat) => ({
+                                ...cat, values: [...cat.values, { id: newId(), name, color }],
+                            }))}
+                            onUpdateValue={(valueId, patch) => editCategory(activeCategory.id, (cat) => ({
+                                ...cat, values: cat.values.map((v) => (v.id === valueId ? { ...v, ...patch } : v)),
+                            }))}
+                            onDeleteValue={(valueId) => deleteValue(activeCategory.id, valueId)}
+                            onAssign={(valueId) => assignSelected(activeCategory.id, valueId)}
+                            onClear={() => assignSelected(activeCategory.id, null)}
+                        />
                     )}
                     {(colorMode === 'facadeDominant' || colorMode === 'facadeMixed') && (
                         <>

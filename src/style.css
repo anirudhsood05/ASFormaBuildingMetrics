@@ -392,6 +392,46 @@ button {
 }
 
 /* ============================================================
+   Category panel - one row per value
+   ============================================================ */
+.category-title {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 1.1em !important;
+    font-weight: 600;
+    margin-bottom: 0.6em;
+}
+
+.category-value {
+    display: grid;
+    grid-template-columns: 2.2em minmax(0, 1fr) 2.5em auto auto;
+    align-items: center;
+    gap: 0.5em;
+    margin-bottom: 0.4em;
+}
+
+.category-value--new {
+    grid-template-columns: 2.2em minmax(0, 1fr) auto;
+    margin-top: 0.8em;
+    padding-top: 0.8em;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.category-value__swatch {
+    width: 2.2em;
+    height: 2.2em;
+    border-radius: 4px;
+    border: 1px solid var(--border-subtle);
+    box-sizing: border-box;
+}
+
+.category-value__count {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
+}
+
+/* ============================================================
    Sort controls
    ============================================================ */
 .sort-controls {
@@ -423,6 +463,31 @@ select {
     select:hover {
         border-color: var(--border-strong);
     }
+
+input[type="text"] {
+    background: var(--bg-page);
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+    border-radius: 4px;
+    padding: 0.4em 0.6em;
+    font-size: 0.9em;
+    font-family: inherit;
+    min-width: 0;
+}
+
+    input[type="text"]:hover {
+        border-color: var(--border-strong);
+    }
+
+input[type="color"] {
+    width: 2.2em;
+    height: 2.2em;
+    padding: 0;
+    border: 1px solid var(--border-default);
+    border-radius: 4px;
+    background: none;
+    cursor: pointer;
+}
 
 .sort-dir-btn {
     background: transparent;
