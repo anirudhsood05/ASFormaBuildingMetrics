@@ -6,6 +6,7 @@ import {
     Assignments, Category, CategoryValue, UNASSIGNED_COLOR, defaultCategories, getProposalId,
     loadAssignments, loadCategories, newId, paletteColor, saveAssignments, saveCategories,
 } from "./categories";
+import { buildEnvelope, encodeGlb, translationMatrix } from "./envelope";
 import {
     ImportPlan, buildExportRows, categoryValueName, decodeText, parseTable, planImport, toCsv, toTsv,
 } from "./table";
@@ -43,6 +44,9 @@ type ColorMode =
     | 'height' | 'area' | 'volume' | 'floors'
     | 'facadeDominant' | 'facadeMixed'
     | `category:${string}`;
+
+/** Element category tagged on envelopes so they can be found again to remove. */
+const ENVELOPE_CATEGORY = 'context-envelope';
 
 const categoryMode = (id: string): ColorMode => `category:${id}`;
 
@@ -579,6 +583,9 @@ function App() {
     const [showPaste, setShowPaste] = useState<boolean>(false);
     const [pasteText, setPasteText] = useState<string>('');
     const [importMessage, setImportMessage] = useState<string | null>(null);
+    const [envelopeMargin, setEnvelopeMargin] = useState<number>(1);
+    const [isEnveloping, setIsEnveloping] = useState<boolean>(false);
+    const [envelopeMessage, setEnvelopeMessage] = useState<string | null>(null);
     const fileInput = useRef<HTMLInputElement>(null);
 
     // NEW in Pass 2: sort state
@@ -758,6 +765,71 @@ function App() {
         } catch (error) {
             console.error(error);
             setErrorMessage('Failed to read the Forma selection.');
+        }
+    };
+
+    /** Creates a red envelope element over the selected buildings. It is added to the proposal, so it persists. */
+    const createEnvelope = async () => {
+        setIsEnveloping(true);
+        setEnvelopeMessage(null);
+        try {
+            const paths = await selectedBuildingPaths();
+            if (paths.length === 0) {
+                setEnvelopeMessage('No buildings selected. Select buildings in Forma first.');
+                return;
+            }
+            const chosen = buildingData.filter((b) => paths.includes(b.path));
+            const footprints = (await Promise.all(chosen.map((b) => Forma.geometry.getFootprint({ path: b.path }))))
+                .flatMap((fp) => (fp ? [fp.coordinates as [number, number][]] : []));
+            const envelope = buildEnvelope({
+                footprints,
+                minZ: Math.min(...chosen.map((b) => b.centre.z - b.height / 2)),
+                maxZ: Math.max(...chosen.map((b) => b.centre.z + b.height / 2)),
+                margin: envelopeMargin,
+            });
+            if (!envelope) {
+                setEnvelopeMessage('The selected buildings have no usable footprint.');
+                return;
+            }
+            const { blobId } = await Forma.integrateElements.uploadFile({ data: encodeGlb(envelope.positions) });
+            const { urn } = await Forma.integrateElements.createElementV2({
+                // virtual: analyses and metrics ignore the element, so it is purely illustrative.
+                properties: { name: 'Context envelope', category: ENVELOPE_CATEGORY, virtual: true },
+                representations: { volumeMesh: { type: 'linked', blobId } },
+            });
+            const { path } = await Forma.elements.add({
+                urn, name: 'Context envelope', transform: translationMatrix(envelope.origin),
+            });
+            // Red override in case the stored mesh drops its material.
+            await Forma.render.elementColors.set({ pathsToColor: new Map([[path, '#e61a1a']]) });
+            setEnvelopeMessage(`Envelope added over ${chosen.length} building${chosen.length === 1 ? '' : 's'}. Use Remove Envelopes to delete it.`);
+        } catch (error) {
+            console.error(error);
+            setEnvelopeMessage(error instanceof Error ? `Failed to create the envelope: ${error.message}` : 'Failed to create the envelope.');
+        } finally {
+            setIsEnveloping(false);
+        }
+    };
+
+    /** Removes every envelope this panel created (found by its category, so it works after a reload). */
+    const removeEnvelopes = async () => {
+        setIsEnveloping(true);
+        setEnvelopeMessage(null);
+        try {
+            const paths = await Forma.geometry.getPathsByCategory({ category: ENVELOPE_CATEGORY });
+            if (paths.length === 0) {
+                setEnvelopeMessage('There are no envelopes to remove.');
+                return;
+            }
+            // One at a time: each removal edits the element tree.
+            for (const path of paths) await Forma.elements.remove({ path });
+            await Forma.render.elementColors.clear({ paths }).catch(console.error);
+            setEnvelopeMessage(`Removed ${paths.length} envelope${paths.length === 1 ? '' : 's'}.`);
+        } catch (error) {
+            console.error(error);
+            setEnvelopeMessage(error instanceof Error ? `Failed to remove the envelope: ${error.message}` : 'Failed to remove the envelope.');
+        } finally {
+            setIsEnveloping(false);
         }
     };
 
@@ -1126,6 +1198,30 @@ function App() {
                             <button class="button-ghost" onClick={reset}>Reset</button>
                         </div>
                     </div>
+
+                    {canEdit && (
+                        <div class="section">
+                            <h3>Context Envelope</h3>
+                            <div class="row">
+                                <label class="muted" for="envelope-margin">Margin (m)</label>
+                                <input
+                                    id="envelope-margin"
+                                    type="number" min="0" step="0.5"
+                                    value={envelopeMargin}
+                                    onInput={(e) => setEnvelopeMargin(Math.max(0, Number((e.target as HTMLInputElement).value) || 0))}
+                                />
+                            </div>
+                            <button onClick={createEnvelope} disabled={isLoading || isEnveloping || buildingData.length === 0}>
+                                {isEnveloping ? <><span class="spinner">⟳</span> Working…</> : 'Create Envelope over Selection'}
+                            </button>
+                            <button class="button-ghost" onClick={removeEnvelopes} disabled={isLoading || isEnveloping}>
+                                Remove Envelopes
+                            </button>
+                            <p class="muted">
+                                {envelopeMessage ?? 'Select buildings in Forma, then add a red volume enclosing them (convex hull of their footprints). It is saved in the proposal as a virtual element, so analyses ignore it. Remove Envelopes deletes all envelopes created here.'}
+                            </p>
+                        </div>
+                    )}
 
                     <div class="section">
                         <h3>Export</h3>
