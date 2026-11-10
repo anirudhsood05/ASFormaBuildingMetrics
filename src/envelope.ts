@@ -1,9 +1,9 @@
 // Context-highlight envelope: pure geometry + GLB encoding (no Forma calls).
 //
-// The envelope is the convex hull of the selected buildings' plan outline, pushed
-// outwards by a margin and extruded from the lowest ground level to just above
-// the tallest building. It is encoded as a binary glTF (GLB) so it can be
-// uploaded as an element's `volumeMesh` representation.
+// The envelope is a stack of height bands. Each band is the convex hull of the geometry
+// that reaches above its base, pushed outwards by a margin, so setbacks and lower blocks
+// are followed instead of one hull being extruded to the full height. The top gets headroom.
+// It is encoded as a binary glTF (GLB) so it can be uploaded as an element's `volumeMesh` representation.
 
 export type Point = [number, number];
 
@@ -55,13 +55,12 @@ export const offsetConvex = (hull: Point[], distance: number): Point[] => {
 };
 
 export interface EnvelopeInput {
-    /** Plan points (XY) of every selected building, e.g. mesh vertices (scene units, metres). */
-    footprints: Point[][];
-    /** Lowest and highest Z across the selected buildings. */
-    minZ: number;
-    maxZ: number;
+    /** Triangle positions (flat XYZ, 9 floats per triangle) of every selected building, scene metres. */
+    meshes: Float32Array[];
     /** Sideways and upward clearance around the buildings, in metres. */
     margin: number;
+    /** Roof levels closer together than this (metres) are treated as one step. */
+    stepTolerance?: number;
 }
 
 export interface Envelope {
@@ -69,33 +68,98 @@ export interface Envelope {
     positions: number[];
     /** Where `positions` are relative to; use as the element's translation. */
     origin: [number, number, number];
+    /** Number of stacked height bands (1 = a plain extruded hull). */
+    bands: number;
 }
 
-/** Builds the envelope mesh, or null when the points give no usable area. */
-export const buildEnvelope = ({ footprints, minZ, maxZ, margin }: EnvelopeInput): Envelope | null => {
-    const hull = convexHull(footprints.flat());
-    if (hull.length < 3) return null;
-    const ring = offsetConvex(hull, margin);
+/** Roofs smaller than this (m²) do not create a step (plant rooms, parapets). */
+const MIN_STEP_AREA = 4;
 
-    const ox = ring.reduce((s, p) => s + p[0], 0) / ring.length;
-    const oy = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+/**
+ * Heights at which the buildings step: clusters of upward-facing (roof) triangles, merged within
+ * `tolerance`, each represented by its highest point. The result always ends at `maxZ`.
+ */
+const stepLevels = (meshes: Float32Array[], minZ: number, maxZ: number, tolerance: number): number[] => {
+    const roofs: { z: number; area: number }[] = [];
+    for (const m of meshes) {
+        for (let i = 0; i < m.length; i += 9) {
+            const ux = m[i + 3] - m[i], uy = m[i + 4] - m[i + 1], uz = m[i + 5] - m[i + 2];
+            const vx = m[i + 6] - m[i], vy = m[i + 7] - m[i + 1], vz = m[i + 8] - m[i + 2];
+            const nz = ux * vy - uy * vx;
+            const len = Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, nz);
+            if (len > 0 && nz / len > 0.5) roofs.push({ z: Math.max(m[i + 2], m[i + 5], m[i + 8]), area: nz / 2 });
+        }
+    }
+    roofs.sort((a, b) => a.z - b.z);
+    const levels: number[] = [];
+    let cluster: { top: number; area: number; start: number } | null = null;
+    const close = () => {
+        if (cluster && cluster.area >= MIN_STEP_AREA && cluster.top > minZ + tolerance && cluster.top < maxZ - tolerance) {
+            levels.push(cluster.top);
+        }
+    };
+    for (const r of roofs) {
+        if (cluster && r.z - cluster.start <= tolerance) {
+            cluster.top = Math.max(cluster.top, r.z);
+            cluster.area += r.area;
+        } else {
+            close();
+            cluster = { top: r.z, area: r.area, start: r.z };
+        }
+    }
+    close();
+    return [...levels, maxZ];
+};
+
+/** Builds the stepped envelope mesh, or null when the geometry gives no usable area. */
+export const buildEnvelope = ({ meshes, margin, stepTolerance = 1.5 }: EnvelopeInput): Envelope | null => {
+    let minZ = Infinity, maxZ = -Infinity;
+    const pts: [number, number, number][] = [];
+    for (const m of meshes) {
+        for (let i = 0; i < m.length; i += 3) {
+            pts.push([m[i], m[i + 1], m[i + 2]]);
+            if (m[i + 2] < minZ) minZ = m[i + 2];
+            if (m[i + 2] > maxZ) maxZ = m[i + 2];
+        }
+    }
+    if (pts.length === 0) return null;
+
+    // Each band spans two step levels; its outline is the hull of the geometry reaching above its base.
+    const tops = stepLevels(meshes, minZ, maxZ, stepTolerance);
+    const bands: { bottom: number; top: number; ring: Point[] }[] = [];
+    let bottom = minZ;
+    for (const level of tops) {
+        const first = bands.length === 0;
+        const above = pts.filter((p) => (first ? p[2] >= bottom : p[2] > bottom + 1e-6)).map((p) => [p[0], p[1]] as Point);
+        const hull = convexHull(above);
+        if (hull.length >= 3) bands.push({ bottom, top: level, ring: offsetConvex(hull, margin) });
+        bottom = level;
+    }
+    if (bands.length === 0) return null;
+    bands[bands.length - 1].top += margin; // headroom above the tallest roof
+
+    const base = bands[0].ring;
+    const ox = base.reduce((s, p) => s + p[0], 0) / base.length;
+    const oy = base.reduce((s, p) => s + p[1], 0) / base.length;
     const oz = minZ;
-    const top = maxZ + margin - oz;
-    const local = ring.map((p) => [p[0] - ox, p[1] - oy] as Point);
 
     const positions: number[] = [];
     const tri = (a: number[], b: number[], c: number[]) => positions.push(...a, ...b, ...c);
-    const at = (p: Point, z: number) => [p[0], p[1], z];
-    for (let i = 1; i < local.length - 1; i++) {
-        tri(at(local[0], top), at(local[i], top), at(local[i + 1], top)); // roof, faces up
-        tri(at(local[0], 0), at(local[i + 1], 0), at(local[i], 0)); // floor, faces down
-    }
-    for (let i = 0; i < local.length; i++) {
-        const p = local[i], q = local[(i + 1) % local.length];
-        tri(at(p, 0), at(q, 0), at(q, top)); // walls, face outwards
-        tri(at(p, 0), at(q, top), at(p, top));
-    }
-    return { positions, origin: [ox, oy, oz] };
+    bands.forEach((band, bi) => {
+        const ring = band.ring.map((p) => [p[0] - ox, p[1] - oy] as Point);
+        const lo = band.bottom - oz, hi = band.top - oz;
+        const at = (p: Point, z: number) => [p[0], p[1], z];
+        for (let i = 1; i < ring.length - 1; i++) {
+            tri(at(ring[0], hi), at(ring[i], hi), at(ring[i + 1], hi)); // roof, faces up
+            if (bi === 0) tri(at(ring[0], lo), at(ring[i + 1], lo), at(ring[i], lo)); // floor, faces down
+        }
+        for (let i = 0; i < ring.length; i++) {
+            const p = ring[i], q = ring[(i + 1) % ring.length];
+            tri(at(p, lo), at(q, lo), at(q, hi)); // walls, face outwards
+            tri(at(p, lo), at(q, hi), at(p, hi));
+        }
+    });
+    return { positions, origin: [ox, oy, oz], bands: bands.length };
 };
 
 /** Column-major 4x4 translation matrix, as `Forma.elements.add` expects. */
