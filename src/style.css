@@ -497,7 +497,8 @@ select {
         border-color: var(--border-strong);
     }
 
-input[type="text"] {
+input[type="text"],
+input[type="number"] {
     background: var(--bg-page);
     color: var(--text-primary);
     border: 1px solid var(--border-default);
@@ -508,7 +509,8 @@ input[type="text"] {
     min-width: 0;
 }
 
-    input[type="text"]:hover {
+    input[type="text"]:hover,
+    input[type="number"]:hover {
         border-color: var(--border-strong);
     }
 
@@ -524,6 +526,10 @@ textarea {
     font-size: 0.85em;
     font-family: ui-monospace, Menlo, Consolas, monospace;
     resize: vertical;
+}
+
+input[type="number"] {
+    width: 5em;
 }
 
 input[type="color"] {

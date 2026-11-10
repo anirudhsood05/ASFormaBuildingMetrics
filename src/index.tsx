@@ -109,6 +109,22 @@ const calculatePolygonArea = (coordinates: [number, number][]): number => {
     return Math.abs(area / 2);
 };
 
+/**
+ * Plan area estimated from the mesh: the XY-projected area of upward-facing triangles.
+ * Used when getFootprint returns nothing (it does not include child elements). Assumes a
+ * solid massing; a model with internal slabs would overcount.
+ */
+const calculateMeshPlanArea = (position: Float32Array): number => {
+    let area = 0;
+    for (let i = 0; i < position.length; i += 9) {
+        const cross =
+            (position[i + 3] - position[i]) * (position[i + 7] - position[i + 1]) -
+            (position[i + 4] - position[i + 1]) * (position[i + 6] - position[i]);
+        if (cross > 0) area += cross / 2; // counter-clockwise in plan means the face points up
+    }
+    return area;
+};
+
 const calculateNormal = (
     v1: [number, number, number],
     v2: [number, number, number],
@@ -620,7 +636,8 @@ function App() {
                     const size = position.length > 0 ? Math.max(maxX - minX, maxY - minY, height) : 0;
 
                     const footprint = await Forma.geometry.getFootprint({ path });
-                    const footprintArea = footprint ? calculatePolygonArea(footprint.coordinates) : 0;
+                    let footprintArea = footprint ? calculatePolygonArea(footprint.coordinates) : 0;
+                    if (footprintArea === 0) footprintArea = calculateMeshPlanArea(position);
 
                     // Estimates: extruded footprint and an assumed 3.5 m floor-to-floor height.
                     const volume = height * footprintArea;
@@ -779,8 +796,14 @@ function App() {
                 return;
             }
             const chosen = buildingData.filter((b) => paths.includes(b.path));
-            const footprints = (await Promise.all(chosen.map((b) => Forma.geometry.getFootprint({ path: b.path }))))
-                .flatMap((fp) => (fp ? [fp.coordinates as [number, number][]] : []));
+            // Hull input is every mesh vertex's XY. getFootprint is not used because it does not
+            // include child elements, so it comes back empty for buildings built from children.
+            const footprints = await Promise.all(chosen.map(async (b) => {
+                const position = await Forma.geometry.getTriangles({ path: b.path });
+                const points: [number, number][] = [];
+                for (let i = 0; i < position.length; i += 3) points.push([position[i], position[i + 1]]);
+                return points;
+            }));
             const envelope = buildEnvelope({
                 footprints,
                 minZ: Math.min(...chosen.map((b) => b.centre.z - b.height / 2)),
@@ -788,7 +811,7 @@ function App() {
                 margin: envelopeMargin,
             });
             if (!envelope) {
-                setEnvelopeMessage('The selected buildings have no usable footprint.');
+                setEnvelopeMessage('Could not build an envelope: the selected buildings have no 3D geometry.');
                 return;
             }
             const { blobId } = await Forma.integrateElements.uploadFile({ data: encodeGlb(envelope.positions) });
@@ -1218,7 +1241,7 @@ function App() {
                                 Remove Envelopes
                             </button>
                             <p class="muted">
-                                {envelopeMessage ?? 'Select buildings in Forma, then add a red volume enclosing them (convex hull of their footprints). It is saved in the proposal as a virtual element, so analyses ignore it. Remove Envelopes deletes all envelopes created here.'}
+                                {envelopeMessage ?? 'Select buildings in Forma, then add a red volume enclosing them (convex hull of their geometry). It is saved in the proposal as a virtual element, so analyses ignore it. Remove Envelopes deletes all envelopes created here.'}
                             </p>
                         </div>
                     )}

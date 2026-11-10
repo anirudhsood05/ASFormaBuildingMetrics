@@ -1,6 +1,6 @@
 // Context-highlight envelope: pure geometry + GLB encoding (no Forma calls).
 //
-// The envelope is the convex hull of the selected buildings' footprints, pushed
+// The envelope is the convex hull of the selected buildings' plan outline, pushed
 // outwards by a margin and extruded from the lowest ground level to just above
 // the tallest building. It is encoded as a binary glTF (GLB) so it can be
 // uploaded as an element's `volumeMesh` representation.
@@ -55,7 +55,7 @@ export const offsetConvex = (hull: Point[], distance: number): Point[] => {
 };
 
 export interface EnvelopeInput {
-    /** Footprint rings of every selected building (scene units, metres). */
+    /** Plan points (XY) of every selected building, e.g. mesh vertices (scene units, metres). */
     footprints: Point[][];
     /** Lowest and highest Z across the selected buildings. */
     minZ: number;
@@ -71,7 +71,7 @@ export interface Envelope {
     origin: [number, number, number];
 }
 
-/** Builds the envelope mesh, or null when the footprints give no usable area. */
+/** Builds the envelope mesh, or null when the points give no usable area. */
 export const buildEnvelope = ({ footprints, minZ, maxZ, margin }: EnvelopeInput): Envelope | null => {
     const hull = convexHull(footprints.flat());
     if (hull.length < 3) return null;
