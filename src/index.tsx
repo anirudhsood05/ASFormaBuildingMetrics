@@ -779,8 +779,14 @@ function App() {
                 return;
             }
             const chosen = buildingData.filter((b) => paths.includes(b.path));
-            const footprints = (await Promise.all(chosen.map((b) => Forma.geometry.getFootprint({ path: b.path }))))
-                .flatMap((fp) => (fp ? [fp.coordinates as [number, number][]] : []));
+            // Hull input is every mesh vertex's XY. getFootprint is not used because it does not
+            // include child elements, so it comes back empty for buildings built from children.
+            const footprints = await Promise.all(chosen.map(async (b) => {
+                const position = await Forma.geometry.getTriangles({ path: b.path });
+                const points: [number, number][] = [];
+                for (let i = 0; i < position.length; i += 3) points.push([position[i], position[i + 1]]);
+                return points;
+            }));
             const envelope = buildEnvelope({
                 footprints,
                 minZ: Math.min(...chosen.map((b) => b.centre.z - b.height / 2)),
@@ -788,7 +794,7 @@ function App() {
                 margin: envelopeMargin,
             });
             if (!envelope) {
-                setEnvelopeMessage('The selected buildings have no usable footprint.');
+                setEnvelopeMessage('Could not build an envelope: the selected buildings have no 3D geometry.');
                 return;
             }
             const { blobId } = await Forma.integrateElements.uploadFile({ data: encodeGlb(envelope.positions) });
@@ -1218,7 +1224,7 @@ function App() {
                                 Remove Envelopes
                             </button>
                             <p class="muted">
-                                {envelopeMessage ?? 'Select buildings in Forma, then add a red volume enclosing them (convex hull of their footprints). It is saved in the proposal as a virtual element, so analyses ignore it. Remove Envelopes deletes all envelopes created here.'}
+                                {envelopeMessage ?? 'Select buildings in Forma, then add a red volume enclosing them (convex hull of their geometry). It is saved in the proposal as a virtual element, so analyses ignore it. Remove Envelopes deletes all envelopes created here.'}
                             </p>
                         </div>
                     )}
