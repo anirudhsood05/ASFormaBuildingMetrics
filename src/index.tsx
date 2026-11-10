@@ -109,6 +109,22 @@ const calculatePolygonArea = (coordinates: [number, number][]): number => {
     return Math.abs(area / 2);
 };
 
+/**
+ * Plan area estimated from the mesh: the XY-projected area of upward-facing triangles.
+ * Used when getFootprint returns nothing (it does not include child elements). Assumes a
+ * solid massing; a model with internal slabs would overcount.
+ */
+const calculateMeshPlanArea = (position: Float32Array): number => {
+    let area = 0;
+    for (let i = 0; i < position.length; i += 9) {
+        const cross =
+            (position[i + 3] - position[i]) * (position[i + 7] - position[i + 1]) -
+            (position[i + 4] - position[i + 1]) * (position[i + 6] - position[i]);
+        if (cross > 0) area += cross / 2; // counter-clockwise in plan means the face points up
+    }
+    return area;
+};
+
 const calculateNormal = (
     v1: [number, number, number],
     v2: [number, number, number],
@@ -620,7 +636,8 @@ function App() {
                     const size = position.length > 0 ? Math.max(maxX - minX, maxY - minY, height) : 0;
 
                     const footprint = await Forma.geometry.getFootprint({ path });
-                    const footprintArea = footprint ? calculatePolygonArea(footprint.coordinates) : 0;
+                    let footprintArea = footprint ? calculatePolygonArea(footprint.coordinates) : 0;
+                    if (footprintArea === 0) footprintArea = calculateMeshPlanArea(position);
 
                     // Estimates: extruded footprint and an assumed 3.5 m floor-to-floor height.
                     const volume = height * footprintArea;
