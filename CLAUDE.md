@@ -24,7 +24,7 @@ There is no test runner or linter configured. `npm run build` fails on TypeScrip
 
 ## Architecture
 
-Almost everything lives in `src/index.tsx` (~1,180 lines, Preact). `src/categories.ts` holds the user-defined category model and its storage. `src/table.ts` holds the export table and CSV import (pure functions, no Forma calls). There is no routing, no state management library and no component folder.
+Almost everything lives in `src/index.tsx` (~1,240 lines, Preact). `src/categories.ts` holds the user-defined category model and its storage. `src/table.ts` holds the export table and CSV import (pure functions, no Forma calls). `src/envelope.ts` holds the context-envelope geometry and GLB encoder (also pure). There is no routing, no state management library and no component folder.
 
 **Forma SDK integration** (`forma-embedded-view-sdk/auto`):
 - `Forma.geometry.getPathsByCategory({ category: "building" })` — enumerate building paths in the scene
@@ -37,6 +37,7 @@ Almost everything lives in `src/index.tsx` (~1,180 lines, Preact). `src/categori
 - `Forma.render.cleanup()` — remove custom color overlays
 - `Forma.extensions.storage.getTextObject` / `setObject` — category storage, scoped to the current project: `categories.json` (definitions, project-wide) and `assignments-<proposalId>.json` (categoryId → building path → valueId). Writes to one key are queued so they land in order
 - `Forma.udm.getRootUrn()` — proposal identity; its last segment is a revision that changes on every edit, so `getProposalId` keeps only the `<id>` segment
+- `Forma.integrateElements.uploadFile` / `createElementV2` + `Forma.elements.add` — Context Envelope: the convex hull of the selected footprints, offset by a margin and extruded, is encoded as a GLB, uploaded, created as a `virtual: true` element (analyses ignore it) with a `volumeMesh` representation, and added to the proposal (persists; needs edit access). Red is set in the GLB material and also via `elementColors.set` because Forma may drop GLB materials. `GLB_Y_UP` in `envelope.ts` switches the axis conversion
 - `Forma.getCanEdit()` — category editing is hidden for view-only users
 
 **Key derived metrics** (computed client-side, no backend):
