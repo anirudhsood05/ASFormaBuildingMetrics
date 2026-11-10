@@ -796,20 +796,9 @@ function App() {
                 return;
             }
             const chosen = buildingData.filter((b) => paths.includes(b.path));
-            // Hull input is every mesh vertex's XY. getFootprint is not used because it does not
-            // include child elements, so it comes back empty for buildings built from children.
-            const footprints = await Promise.all(chosen.map(async (b) => {
-                const position = await Forma.geometry.getTriangles({ path: b.path });
-                const points: [number, number][] = [];
-                for (let i = 0; i < position.length; i += 3) points.push([position[i], position[i + 1]]);
-                return points;
-            }));
-            const envelope = buildEnvelope({
-                footprints,
-                minZ: Math.min(...chosen.map((b) => b.centre.z - b.height / 2)),
-                maxZ: Math.max(...chosen.map((b) => b.centre.z + b.height / 2)),
-                margin: envelopeMargin,
-            });
+            // Mesh triangles (not getFootprint, which skips child elements) drive the stepped outline.
+            const meshes = await Promise.all(chosen.map((b) => Forma.geometry.getTriangles({ path: b.path })));
+            const envelope = buildEnvelope({ meshes, margin: envelopeMargin });
             if (!envelope) {
                 setEnvelopeMessage('Could not build an envelope: the selected buildings have no 3D geometry.');
                 return;
@@ -1241,7 +1230,7 @@ function App() {
                                 Remove Envelopes
                             </button>
                             <p class="muted">
-                                {envelopeMessage ?? 'Select buildings in Forma, then add a red volume enclosing them (convex hull of their geometry). It is saved in the proposal as a virtual element, so analyses ignore it. Remove Envelopes deletes all envelopes created here.'}
+                                {envelopeMessage ?? 'Select buildings in Forma, then add a red volume enclosing them (stepped to follow setbacks and lower blocks). It is saved in the proposal as a virtual element, so analyses ignore it. Remove Envelopes deletes all envelopes created here.'}
                             </p>
                         </div>
                     )}
