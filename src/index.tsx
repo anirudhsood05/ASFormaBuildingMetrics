@@ -45,6 +45,9 @@ type ColorMode =
     | 'facadeDominant' | 'facadeMixed'
     | `category:${string}`;
 
+/** Element category tagged on envelopes so they can be found again to remove. */
+const ENVELOPE_CATEGORY = 'context-envelope';
+
 const categoryMode = (id: string): ColorMode => `category:${id}`;
 
 type SortKey = 'index' | 'height' | 'area' | 'floors';
@@ -791,7 +794,7 @@ function App() {
             const { blobId } = await Forma.integrateElements.uploadFile({ data: encodeGlb(envelope.positions) });
             const { urn } = await Forma.integrateElements.createElementV2({
                 // virtual: analyses and metrics ignore the element, so it is purely illustrative.
-                properties: { name: 'Context envelope', category: 'context-envelope', virtual: true },
+                properties: { name: 'Context envelope', category: ENVELOPE_CATEGORY, virtual: true },
                 representations: { volumeMesh: { type: 'linked', blobId } },
             });
             const { path } = await Forma.elements.add({
@@ -799,10 +802,32 @@ function App() {
             });
             // Red override in case the stored mesh drops its material.
             await Forma.render.elementColors.set({ pathsToColor: new Map([[path, '#e61a1a']]) });
-            setEnvelopeMessage(`Envelope added over ${chosen.length} building${chosen.length === 1 ? '' : 's'}. Remove it from the Forma element list if it is no longer needed.`);
+            setEnvelopeMessage(`Envelope added over ${chosen.length} building${chosen.length === 1 ? '' : 's'}. Use Remove Envelopes to delete it.`);
         } catch (error) {
             console.error(error);
             setEnvelopeMessage(error instanceof Error ? `Failed to create the envelope: ${error.message}` : 'Failed to create the envelope.');
+        } finally {
+            setIsEnveloping(false);
+        }
+    };
+
+    /** Removes every envelope this panel created (found by its category, so it works after a reload). */
+    const removeEnvelopes = async () => {
+        setIsEnveloping(true);
+        setEnvelopeMessage(null);
+        try {
+            const paths = await Forma.geometry.getPathsByCategory({ category: ENVELOPE_CATEGORY });
+            if (paths.length === 0) {
+                setEnvelopeMessage('There are no envelopes to remove.');
+                return;
+            }
+            // One at a time: each removal edits the element tree.
+            for (const path of paths) await Forma.elements.remove({ path });
+            await Forma.render.elementColors.clear({ paths }).catch(console.error);
+            setEnvelopeMessage(`Removed ${paths.length} envelope${paths.length === 1 ? '' : 's'}.`);
+        } catch (error) {
+            console.error(error);
+            setEnvelopeMessage(error instanceof Error ? `Failed to remove the envelope: ${error.message}` : 'Failed to remove the envelope.');
         } finally {
             setIsEnveloping(false);
         }
@@ -1187,10 +1212,13 @@ function App() {
                                 />
                             </div>
                             <button onClick={createEnvelope} disabled={isLoading || isEnveloping || buildingData.length === 0}>
-                                {isEnveloping ? <><span class="spinner">⟳</span> Creating…</> : 'Create Envelope over Selection'}
+                                {isEnveloping ? <><span class="spinner">⟳</span> Working…</> : 'Create Envelope over Selection'}
+                            </button>
+                            <button class="button-ghost" onClick={removeEnvelopes} disabled={isLoading || isEnveloping}>
+                                Remove Envelopes
                             </button>
                             <p class="muted">
-                                {envelopeMessage ?? 'Select buildings in Forma, then add a red volume enclosing them (convex hull of their footprints). It is saved in the proposal as a virtual element, so analyses ignore it.'}
+                                {envelopeMessage ?? 'Select buildings in Forma, then add a red volume enclosing them (convex hull of their footprints). It is saved in the proposal as a virtual element, so analyses ignore it. Remove Envelopes deletes all envelopes created here.'}
                             </p>
                         </div>
                     )}
